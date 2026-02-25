@@ -14,6 +14,7 @@ function connectionText(status: ConnectionPayload["status"]) {
 export default function QrScannerPage() {
     const [qrValue, setQrValue] = useState("");
     const [status, setStatus] = useState<ConnectionPayload["status"]>("close");
+    const [isResetting, setIsResetting] = useState(false);
 
     useEffect(() => {
         const source = new EventSource("/api/sse");
@@ -37,6 +38,44 @@ export default function QrScannerPage() {
         };
     }, []);
 
+    useEffect(() => {
+        let active = true;
+
+        const loadStatus = async () => {
+            try {
+                const res = await fetch("/api/wa/status", { cache: "no-store" });
+                const data = (await res.json()) as { status?: ConnectionPayload["status"] };
+                if (active && data.status) {
+                    setStatus(data.status);
+                }
+            } catch {
+                if (active) {
+                    setStatus("close");
+                }
+            }
+        };
+
+        loadStatus();
+        const timer = setInterval(loadStatus, 5000);
+
+        return () => {
+            active = false;
+            clearInterval(timer);
+        };
+    }, []);
+
+    const handleResetSession = async () => {
+        setIsResetting(true);
+        setQrValue("");
+        setStatus("connecting");
+
+        try {
+            await fetch("/api/wa/reset-session", { method: "POST" });
+        } finally {
+            setIsResetting(false);
+        }
+    };
+
     return (
         <section className="space-y-4">
             <div>
@@ -45,9 +84,19 @@ export default function QrScannerPage() {
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-6">
-                <p className="mb-4 text-sm text-slate-600">
-                    Status koneksi: <span className="font-semibold text-slate-900">{connectionText(status)}</span>
-                </p>
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm text-slate-600">
+                        Status koneksi: <span className="font-semibold text-slate-900">{connectionText(status)}</span>
+                    </p>
+                    <button
+                        type="button"
+                        onClick={handleResetSession}
+                        disabled={isResetting}
+                        className="rounded-md bg-rose-600 px-3 py-2 text-xs font-medium text-white hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        {isResetting ? "Memproses..." : "Hapus Session & Scan Ulang"}
+                    </button>
+                </div>
 
                 {qrValue ? (
                     <QRCodeSVG

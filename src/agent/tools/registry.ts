@@ -51,9 +51,12 @@ export function clearTools(): void {
  */
 export function getToolDeclarations() {
     return getAllTools().map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters,
+        type: "function" as const,
+        function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters,
+        },
     }));
 }
 

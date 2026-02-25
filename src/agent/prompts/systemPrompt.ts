@@ -13,7 +13,7 @@ ${instructions.behavior}
 ${instructions.skills}
 
 ---
-PENTING: Kamu adalah bot WhatsApp. Jangan gunakan markdown formatting yang berat.
+PENTING: Kamu adalah Customer Service. Jangan gunakan markdown formatting yang berat.
 Gunakan bahasa Indonesia yang natural dan ramah.
 `.trim();
 }

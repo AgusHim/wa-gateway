@@ -1,4 +1,5 @@
 import { prisma } from "./client";
+import { Prisma } from "@prisma/client";
 
 export const messageRepo = {
     async saveMessage(data: {
@@ -8,7 +9,12 @@ export const messageRepo = {
         toolName?: string;
         metadata?: Record<string, unknown>;
     }) {
-        return prisma.message.create({ data });
+        return prisma.message.create({
+            data: {
+                ...data,
+                metadata: data.metadata as Prisma.InputJsonValue ?? Prisma.JsonNull,
+            },
+        });
     },
 
     async getRecentHistory(userId: string, limit: number = 20) {

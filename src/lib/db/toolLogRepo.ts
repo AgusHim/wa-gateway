@@ -1,4 +1,5 @@
 import { prisma } from "./client";
+import { Prisma } from "@prisma/client";
 
 export const toolLogRepo = {
     async saveToolLog(data: {
@@ -8,7 +9,14 @@ export const toolLogRepo = {
         success: boolean;
         duration: number;
     }) {
-        return prisma.toolLog.create({ data });
+        return prisma.toolLog.create({
+            data: {
+                ...data,
+                input: data.input as Prisma.InputJsonValue,
+                output: data.output as Prisma.InputJsonValue ?? Prisma.JsonNull,
+            },
+        });
+
     },
 
     async getToolLogs(filter?: {

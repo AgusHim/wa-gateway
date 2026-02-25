@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({});
 
 async function main() {
     console.log("🌱 Seeding database...");
@@ -12,7 +12,7 @@ async function main() {
         create: {
             id: "singleton",
             isActive: true,
-            model: "gemini-2.0-flash",
+            model: "gemini-2.5-flash-lite",
             maxTokens: 1024,
         },
     });

@@ -53,7 +53,7 @@ model Session {
 model BotConfig {
   id        String   @id @default("singleton")
   isActive  Boolean  @default(true)
-  model     String   @default("gemini-2.0-flash")
+  model     String   @default("gemini-2.5-flash-lite")
   maxTokens Int      @default(1024)
   updatedAt DateTime @updatedAt
 }

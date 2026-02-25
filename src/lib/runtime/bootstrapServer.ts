@@ -2,10 +2,11 @@ declare global {
     var __waGatewayBootPromise: Promise<void> | undefined;
 }
 
-/**
- * Ensure the gateway bootstrap process only runs once per server process.
- */
 export function ensureGatewayBootstrapped(): Promise<void> {
+    if (process.env.NEXT_RUNTIME !== "nodejs") {
+        return Promise.resolve();
+    }
+
     if (!globalThis.__waGatewayBootPromise) {
         globalThis.__waGatewayBootPromise = (async () => {
             try {
@@ -14,7 +15,7 @@ export function ensureGatewayBootstrapped(): Promise<void> {
             } catch (error) {
                 console.error("[Bootstrap] Failed to start gateway:", error);
                 globalThis.__waGatewayBootPromise = undefined;
-                throw error;
+                return;
             }
         })();
     }

@@ -29,7 +29,8 @@ test("tool registry registers and executes a tool", async () => {
 
   const declarations = getToolDeclarations();
   assert.equal(declarations.length, 1);
-  assert.equal(declarations[0].name, "sum_two");
+  assert.equal(declarations[0].type, "function");
+  assert.equal(declarations[0].function.name, "sum_two");
 
   const result = await executeTool(
     "sum_two",

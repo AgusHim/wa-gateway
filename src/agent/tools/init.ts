@@ -1,5 +1,5 @@
 import { registerTool } from "./registry";
-import { getUserInfoTool, saveNoteTool } from "./builtinTools";
+import { fetchSmartScholarEndpointTool, getUserInfoTool, saveNoteTool } from "./builtinTools";
 
 /**
  * Initialize all built-in tools. Call this once at app startup.
@@ -7,6 +7,7 @@ import { getUserInfoTool, saveNoteTool } from "./builtinTools";
 export function initializeTools(): void {
     registerTool(getUserInfoTool);
     registerTool(saveNoteTool);
+    registerTool(fetchSmartScholarEndpointTool);
 
     console.log("[Tools] All built-in tools initialized");
 }

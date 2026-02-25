@@ -8,7 +8,8 @@ const { buildHistoryMessages } = require("../src/agent/prompts/historyPrompt");
 test("buildSystemPrompt includes identity behavior and skills", () => {
   const result = buildSystemPrompt();
 
-  assert.ok(result.includes("PENTING: Kamu adalah bot WhatsApp"));
+  assert.ok(result.includes("PENTING: Kamu adalah Customer Service"));
+  assert.ok(result.includes("Kamu adalah **Cholis**"));
   assert.ok(result.length > 50);
 });
 
@@ -37,5 +38,20 @@ test("buildHistoryMessages filters non user/assistant roles", () => {
   assert.deepEqual(result, [
     { role: "user", content: "Halo" },
     { role: "assistant", content: "Hai" },
+  ]);
+});
+
+test("buildHistoryMessages removes assistant fallback errors from history", () => {
+  const messages = [
+    { role: "user", content: "Halo" },
+    { role: "assistant", content: "Maaf, terjadi kesalahan saat memproses pesan kamu. Coba lagi nanti ya 🙏" },
+    { role: "assistant", content: "Normal reply" },
+  ];
+
+  const result = buildHistoryMessages(messages);
+
+  assert.deepEqual(result, [
+    { role: "user", content: "Halo" },
+    { role: "assistant", content: "Normal reply" },
   ]);
 });

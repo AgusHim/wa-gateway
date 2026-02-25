@@ -31,7 +31,7 @@ export async function updateBotConfigAction(formData: FormData) {
     await requireSession();
 
     const isActive = formData.get("isActive") === "true";
-    const model = String(formData.get("model") || "gemini-2.0-flash").trim();
+    const model = String(formData.get("model") || "gemini-2.5-flash-lite").trim();
     const maxTokensRaw = Number(formData.get("maxTokens"));
     const maxTokens = Number.isFinite(maxTokensRaw) ? maxTokensRaw : 1024;
 

@@ -6,7 +6,7 @@ const envSchema = z.object({
 
     // AI
     GOOGLE_API_KEY: z.string().min(1, "GOOGLE_API_KEY is required"),
-    GEMINI_MODEL: z.string().default("gemini-2.0-flash"),
+    GEMINI_MODEL: z.string().default("gemini-2.5-flash-lite"),
 
     // Database
     DATABASE_URL: z.string().url("Invalid DATABASE_URL"),

@@ -8,6 +8,16 @@ import { loadContextNode } from "@/agent/nodes/loadContext";
 import { AgentState } from "@/agent/types";
 
 const DEFAULT_FALLBACK_RESPONSE = "Hmm, sepertinya aku butuh waktu lebih lama untuk memproses ini. Coba tanya lagi ya! 😊";
+const LLM_ERROR_FALLBACK_RESPONSE = "Maaf, terjadi kesalahan saat memproses pesan kamu. Coba lagi nanti ya 🙏";
+const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const RECOVERY_RESPONSE = "Halo! Aku siap bantu. Coba kirim pertanyaanmu lagi dengan sedikit detail ya.";
+const TOOL_ACK_PREFIX_PATTERNS = [
+    /^\s*(oke|ok|baik)[,!\s-]*(aku|saya)\s*(udah|sudah)\s*cek(?:[^.\n]*?)?[,:.\-]?\s*/i,
+    /^\s*(aku|saya)\s*(udah|sudah)\s*cek(?:[^.\n]*?)?[,:.\-]?\s*/i,
+    /^\s*(udah|sudah)\s*(aku|saya)\s*cek(?:[^.\n]*?)?[,:.\-]?\s*/i,
+];
+
+type ToolDeclaration = ReturnType<typeof getToolDeclarations>[number];
 
 const AgentStateAnnotation = Annotation.Root({
     userId: Annotation<string>,
@@ -15,28 +25,40 @@ const AgentStateAnnotation = Annotation.Root({
     incomingMessage: Annotation<string>,
     pushName: Annotation<string | undefined>,
 
-    systemPrompt: Annotation<string>({ default: () => "" }),
-    memoryContext: Annotation<string>({ default: () => "" }),
-    history: Annotation<Array<{ role: "user" | "assistant"; content: string }>>({ default: () => [] }),
+    systemPrompt: Annotation<string>({ value: (_, b) => b, default: () => "" }),
+    memoryContext: Annotation<string>({ value: (_, b) => b, default: () => "" }),
+    history: Annotation<Array<{ role: "user" | "assistant"; content: string }>>({ value: (_, b) => b, default: () => [] }),
 
-    toolMessages: Annotation<BaseMessage[]>({ default: () => [] }),
-    pendingToolCalls: Annotation<Array<{ id?: string; name: string; args: Record<string, unknown> }>>({ default: () => [] }),
+    toolMessages: Annotation<BaseMessage[]>({ value: (_, b) => b, default: () => [] }),
+    pendingToolCalls: Annotation<Array<{ id?: string; name: string; args: Record<string, unknown> }>>({ value: (_, b) => b, default: () => [] }),
 
-    iterationCount: Annotation<number>({ default: () => 0 }),
-    maxIterations: Annotation<number>({ default: () => 5 }),
-    shouldCallTool: Annotation<boolean>({ default: () => false }),
+    iterationCount: Annotation<number>({ value: (_, b) => b, default: () => 0 }),
+    maxIterations: Annotation<number>({ value: (_, b) => b, default: () => 5 }),
+    shouldCallTool: Annotation<boolean>({ value: (_, b) => b, default: () => false }),
 
-    draftResponse: Annotation<string>({ default: () => "" }),
-    finalResponse: Annotation<string>({ default: () => "" }),
+    draftResponse: Annotation<string>({ value: (_, b) => b, default: () => "" }),
+    finalResponse: Annotation<string>({ value: (_, b) => b, default: () => "" }),
+    lastError: Annotation<string>({ value: (_, b) => b, default: () => "" }),
 });
+
+function buildLLM(model: string) {
+    return new ChatGoogleGenerativeAI({
+        model,
+        maxOutputTokens: 1024,
+        apiKey: process.env.GOOGLE_API_KEY,
+    });
+}
 
 async function createLLM() {
     const config = await configRepo.getBotConfig();
-    return new ChatGoogleGenerativeAI({
+    return {
+        llm: new ChatGoogleGenerativeAI({
+            model: config.model,
+            maxOutputTokens: config.maxTokens,
+            apiKey: process.env.GOOGLE_API_KEY,
+        }),
         model: config.model,
-        maxOutputTokens: config.maxTokens,
-        apiKey: process.env.GOOGLE_API_KEY,
-    });
+    };
 }
 
 function buildMessages(state: AgentState): BaseMessage[] {
@@ -66,45 +88,130 @@ function parseResponseText(content: unknown): string {
     }
 }
 
+function normalizeResponseText(raw: string): string {
+    const cleaned = raw.trim().replace(/```/g, "");
+    if (!cleaned) return "";
+
+    const fallbackPattern = new RegExp(`(?:${escapeRegExp(LLM_ERROR_FALLBACK_RESPONSE)}){2,}`, "g");
+    const collapsed = cleaned.replace(fallbackPattern, LLM_ERROR_FALLBACK_RESPONSE);
+
+    // If response still contains repeated fallback chunks with partial tail, force single fallback text.
+    if (collapsed.startsWith(LLM_ERROR_FALLBACK_RESPONSE) && collapsed !== LLM_ERROR_FALLBACK_RESPONSE) {
+        return LLM_ERROR_FALLBACK_RESPONSE;
+    }
+
+    return collapsed;
+}
+
+function removeToolAckPrefix(raw: string, toolUsed: boolean): string {
+    if (!toolUsed) return raw;
+
+    let output = raw;
+    for (const pattern of TOOL_ACK_PREFIX_PATTERNS) {
+        output = output.replace(pattern, "");
+    }
+
+    const cleaned = output.trimStart();
+    return cleaned || "Berikut hasilnya:";
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatError(error: unknown): string {
+    if (error instanceof Error) {
+        return error.stack ?? `${error.name}: ${error.message}`;
+    }
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
+}
+
+async function invokeLLM(
+    llm: ChatGoogleGenerativeAI,
+    messages: BaseMessage[],
+    toolDeclarations: ToolDeclaration[],
+    withTools: boolean
+) {
+    if (withTools && toolDeclarations.length > 0) {
+        return llm.bindTools(toolDeclarations).invoke(messages);
+    }
+    return llm.invoke(messages);
+}
+
 async function reasonNode(state: AgentState): Promise<Partial<AgentState>> {
-    const llm = await createLLM();
+    const primary = await createLLM();
     const messages = buildMessages(state);
     const toolDeclarations = getToolDeclarations();
+    const errors: string[] = [];
+    let response: AIMessage | undefined;
 
     try {
-        const response = toolDeclarations.length > 0
-            ? await llm.bindTools(toolDeclarations).invoke(messages)
-            : await llm.invoke(messages);
-
-        const toolCalls = (response.tool_calls ?? []).map((call) => ({
-            id: call.id,
-            name: call.name,
-            args: (call.args ?? {}) as Record<string, unknown>,
-        }));
-
-        if (toolCalls.length > 0 && state.iterationCount < state.maxIterations) {
-            return {
-                shouldCallTool: true,
-                pendingToolCalls: toolCalls,
-                toolMessages: [...state.toolMessages, response],
-                iterationCount: state.iterationCount + 1,
-                draftResponse: "",
-            };
-        }
-
-        return {
-            shouldCallTool: false,
-            pendingToolCalls: [],
-            draftResponse: parseResponseText(response.content),
-        };
+        response = await invokeLLM(primary.llm, messages, toolDeclarations, toolDeclarations.length > 0);
     } catch (error) {
-        console.error("[Agent] LLM call failed:", error);
+        const formatted = formatError(error);
+        errors.push(`primary(model=${primary.model}, withTools=true): ${formatted}`);
+        console.error(`[Agent] Primary LLM call failed: ${formatted}`);
+    }
+
+    if (!response && toolDeclarations.length > 0) {
+        try {
+            response = await invokeLLM(primary.llm, messages, toolDeclarations, false);
+            console.warn(`[Agent] Retry without tools succeeded on model=${primary.model}`);
+        } catch (error) {
+            const formatted = formatError(error);
+            errors.push(`primary(model=${primary.model}, withTools=false): ${formatted}`);
+            console.error(`[Agent] Retry without tools failed: ${formatted}`);
+        }
+    }
+
+    if (!response && primary.model !== DEFAULT_MODEL) {
+        try {
+            const fallbackModelLLM = buildLLM(DEFAULT_MODEL);
+            response = await invokeLLM(fallbackModelLLM, messages, toolDeclarations, false);
+            console.warn(`[Agent] Fallback model without tools succeeded: ${DEFAULT_MODEL}`);
+        } catch (error) {
+            const formatted = formatError(error);
+            errors.push(`fallback(model=${DEFAULT_MODEL}, withTools=false): ${formatted}`);
+            console.error(`[Agent] Fallback model call failed: ${formatted}`);
+        }
+    }
+
+    if (!response) {
         return {
             shouldCallTool: false,
             pendingToolCalls: [],
-            draftResponse: "Maaf, terjadi kesalahan saat memproses pesan kamu. Coba lagi nanti ya 🙏",
+            draftResponse: LLM_ERROR_FALLBACK_RESPONSE,
+            lastError: errors.join(" | "),
         };
     }
+
+    const toolCalls = (response.tool_calls ?? []).map((call) => ({
+        id: call.id,
+        name: call.name,
+        args: (call.args ?? {}) as Record<string, unknown>,
+    }));
+
+    if (toolCalls.length > 0 && state.iterationCount < state.maxIterations) {
+        return {
+            shouldCallTool: true,
+            pendingToolCalls: toolCalls,
+            toolMessages: [...state.toolMessages, response],
+            iterationCount: state.iterationCount + 1,
+            draftResponse: "",
+            lastError: "",
+        };
+    }
+
+    return {
+        shouldCallTool: false,
+        pendingToolCalls: [],
+        draftResponse: parseResponseText(response.content),
+        lastError: "",
+    };
 }
 
 async function executeToolNode(state: AgentState): Promise<Partial<AgentState>> {
@@ -145,7 +252,8 @@ async function executeToolNode(state: AgentState): Promise<Partial<AgentState>> 
 }
 
 function formatResponseNode(state: AgentState): Partial<AgentState> {
-    const cleaned = state.draftResponse.trim().replace(/```/g, "");
+    const normalized = normalizeResponseText(state.draftResponse);
+    const cleaned = removeToolAckPrefix(normalized, state.toolMessages.length > 0);
 
     return {
         finalResponse: cleaned || DEFAULT_FALLBACK_RESPONSE,
@@ -183,6 +291,10 @@ export async function invokeAgentGraph(input: {
     pushName?: string;
     maxIterations?: number;
 }): Promise<string> {
+    console.log(
+        `[Agent] invokeAgentGraph userId=${input.userId} phone=${input.phoneNumber} incoming="${input.incomingMessage.slice(0, 160)}"`
+    );
+
     const state = await agentApp.invoke({
         userId: input.userId,
         phoneNumber: input.phoneNumber,
@@ -191,14 +303,31 @@ export async function invokeAgentGraph(input: {
         maxIterations: input.maxIterations ?? 5,
     });
 
-    const finalResponse = state.finalResponse || DEFAULT_FALLBACK_RESPONSE;
+    let finalResponse = state.finalResponse || DEFAULT_FALLBACK_RESPONSE;
+    if (!state.lastError && finalResponse.includes(LLM_ERROR_FALLBACK_RESPONSE)) {
+        console.warn(
+            `[Agent] Model returned fallback-like text without captured error for ${input.phoneNumber}. Using recovery response.`
+        );
+        finalResponse = RECOVERY_RESPONSE;
+    }
+    if (state.lastError) {
+        console.error(
+            `[Agent] Fallback response returned for ${input.phoneNumber}. Incoming: ${input.incomingMessage.slice(0, 160)}`
+        );
+        console.error(`[Agent] Root cause: ${state.lastError}`);
+    } else if (finalResponse === LLM_ERROR_FALLBACK_RESPONSE) {
+        console.error(
+            `[Agent] LLM error fallback used for ${input.phoneNumber}, but root cause was not captured in state.`
+        );
+    }
+    console.log(`[Agent] finalResponse for ${input.phoneNumber}: "${finalResponse.slice(0, 200)}"`);
     return finalResponse;
 }
 
 async function extractAndSaveMemory(userId: string, userMessage: string): Promise<void> {
     try {
         const instructions = loadAllInstructions();
-        const llm = await createLLM();
+        const { llm } = await createLLM();
 
         const extractionPrompt = `${instructions.memory}
 

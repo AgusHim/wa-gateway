@@ -4,6 +4,16 @@ export type AgentExecutor = (
     pushName?: string
 ) => Promise<string>;
 
+const NON_PERSISTED_ASSISTANT_MARKERS = [
+    "Maaf, terjadi kesalahan saat memproses pesan kamu.",
+    "Maaf, sistem sedang mengalami kendala.",
+];
+
+function shouldPersistAssistantMessage(content: string): boolean {
+    const normalized = content.trim();
+    return !NON_PERSISTED_ASSISTANT_MARKERS.some((marker) => normalized.includes(marker));
+}
+
 export async function runAgentWithExecutor(
     executor: AgentExecutor,
     phoneNumber: string,
@@ -58,15 +68,19 @@ export async function runAgent(
             maxIterations: 5,
         });
 
-        await messageRepo.saveMessage({
-            userId: user.id,
-            role: "assistant",
-            content: response,
-        });
+        if (shouldPersistAssistantMessage(response)) {
+            await messageRepo.saveMessage({
+                userId: user.id,
+                role: "assistant",
+                content: response,
+            });
+        } else {
+            console.warn(`[Runner] Skip persisting fallback assistant response for ${phoneNumber}`);
+        }
 
         return response;
     } catch (error) {
         console.error("[Runner] Agent execution failed:", error);
-        return "Maaf, sistem sedang mengalami kendala. Coba lagi sebentar ya 🙏";
+        throw error;
     }
 }

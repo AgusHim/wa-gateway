@@ -1,4 +1,10 @@
-import { waEvents } from "@/lib/baileys/events";
+import {
+    getLatestConnectionStatus,
+    getLatestQr,
+    waEvents,
+} from "@/lib/baileys/events";
+import { sessionRepo } from "@/lib/db/sessionRepo";
+import { ensureGatewayBootstrapped } from "@/lib/runtime/bootstrapServer";
 
 export const runtime = "nodejs";
 
@@ -7,6 +13,12 @@ function toSSE(event: string, data: unknown): string {
 }
 
 export async function GET(request: Request) {
+    await ensureGatewayBootstrapped();
+
+    const sessionId = process.env.WA_SESSION_ID || "main-session";
+    const persistedQr = await sessionRepo.getSession(`${sessionId}:latest-qr`);
+    const initialQr = getLatestQr() || persistedQr?.data || null;
+
     const stream = new ReadableStream<Uint8Array>({
         start(controller) {
             const encoder = new TextEncoder();
@@ -35,6 +47,11 @@ export async function GET(request: Request) {
 
             // Initial event so clients know the stream is connected.
             controller.enqueue(encoder.encode(toSSE("connected", { ok: true })));
+            controller.enqueue(encoder.encode(toSSE("connection-update", { status: getLatestConnectionStatus() })));
+
+            if (initialQr) {
+                controller.enqueue(encoder.encode(toSSE("qr", { qr: initialQr })));
+            }
 
             const heartbeat = setInterval(() => {
                 controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`));
