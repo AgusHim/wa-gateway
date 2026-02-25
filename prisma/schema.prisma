@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id @default(uuid())
+  phoneNumber   String    @unique
+  name          String?
+  label         String?
+  isBlocked     Boolean   @default(false)
+  conversations Message[]
+  memories      Memory[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  userId    String
+  role      String   // 'user' | 'assistant' | 'system' | 'tool'
+  content   String   @db.Text
+  toolName  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model Memory {
+  id         String   @id @default(uuid())
+  userId     String
+  key        String
+  value      String   @db.Text
+  confidence Float    @default(1.0)
+  source     String?
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, key])
+}
+
+model Session {
+  id        String   @id
+  data      String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model BotConfig {
+  id        String   @id @default("singleton")
+  isActive  Boolean  @default(true)
+  model     String   @default("gemini-2.0-flash")
+  maxTokens Int      @default(1024)
+  updatedAt DateTime @updatedAt
+}
+
+model ToolLog {
+  id        String   @id @default(uuid())
+  toolName  String
+  input     Json
+  output    Json?
+  success   Boolean
+  duration  Int      // milliseconds
+  createdAt DateTime @default(now())
+}
