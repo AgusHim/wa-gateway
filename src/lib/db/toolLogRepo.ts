@@ -25,4 +25,23 @@ export const toolLogRepo = {
             take: filter?.limit ?? 100,
         });
     },
+
+    async getDistinctToolNames() {
+        const names = await prisma.toolLog.findMany({
+            distinct: ["toolName"],
+            select: { toolName: true },
+            orderBy: { toolName: "asc" },
+        });
+        return names.map((item) => item.toolName);
+    },
+
+    async getToolUsageSummary() {
+        return prisma.toolLog.groupBy({
+            by: ["toolName"],
+            _count: { toolName: true },
+            orderBy: {
+                _count: { toolName: "desc" },
+            },
+        });
+    },
 };

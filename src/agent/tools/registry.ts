@@ -1,5 +1,3 @@
-import { toolLogRepo } from "../../lib/db/toolLogRepo";
-
 /**
  * Tool interface — all tools must implement this.
  */
@@ -44,6 +42,10 @@ export function getAllTools(): Tool[] {
     return Array.from(tools.values());
 }
 
+export function clearTools(): void {
+    tools.clear();
+}
+
 /**
  * Get tool declarations for Gemini function calling.
  */
@@ -81,14 +83,18 @@ export async function executeTool(
 
     const duration = Date.now() - startTime;
 
-    // Log to database (fire-and-forget)
-    toolLogRepo.saveToolLog({
-        toolName: name,
-        input: params,
-        output: { result },
-        success,
-        duration,
-    }).catch(console.error);
+    // Log to database (fire-and-forget, lazy import to keep tests decoupled from Prisma init)
+    if (process.env.NODE_ENV !== "test") {
+        import("../../lib/db/toolLogRepo")
+            .then(({ toolLogRepo }) => toolLogRepo.saveToolLog({
+                toolName: name,
+                input: params,
+                output: { result },
+                success,
+                duration,
+            }))
+            .catch(console.error);
+    }
 
     return result;
 }

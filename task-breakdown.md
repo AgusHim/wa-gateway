@@ -33,7 +33,7 @@
 ### 2.1 Setup Koneksi
 - [x] Install Baileys: `@whiskeysockets/baileys`
 - [x] Buat `src/lib/baileys/client.ts` — inisialisasi socket & auth state
-- [ ] Implementasi penyimpanan auth credentials ke database (`Session` model)
+- [x] Implementasi penyimpanan auth credentials ke database (`Session` model)
 - [x] Handle event `connection.update`: connected, disconnected, reconnecting
 - [x] Expose status koneksi via singleton agar bisa dibaca dashboard
 
@@ -64,7 +64,7 @@
 - [x] Implementasi concurrency limit (misal: 5 job paralel)
 - [x] Handle job retry: 3x dengan delay eksponensial
 - [x] Handle job failure: log ke `ToolLog` atau console
-- [~] Pastikan worker di-start saat aplikasi boot (di `src/lib/baileys/client.ts` atau server startup)
+- [x] Pastikan worker di-start saat aplikasi boot (di `src/lib/baileys/client.ts` atau server startup)
 
 ---
 
@@ -87,19 +87,19 @@
 - [x] Definisikan interface `Tool` yang wajib diimplementasikan setiap tool baru
 
 ### 4.4 LangGraph Definition
-- [ ] Install `@langchain/langgraph`, `@langchain/google-genai`
-- [ ] Buat `src/agent/graph.ts` — definisi `StateGraph` dengan `AgentState`
-- [ ] Implementasi node `load_context`: fetch memory + chat history dari DB
-- [ ] Implementasi node `reason`: kirim prompt ke Gemini, parse response
-- [ ] Implementasi node `execute_tool`: jalankan tool dari registry, simpan ke `ToolLog`
-- [ ] Implementasi node `format_response`: bersihkan output sebelum dikirim
-- [ ] Implementasi node `update_memory`: ekstrak fakta baru, upsert ke `Memory`
-- [ ] Definisikan edge kondisional: jika ada tool call → `execute_tool`, jika tidak → `format_response`
-- [ ] Compile graph dan export sebagai `agentApp`
+- [x] Install `@langchain/langgraph`, `@langchain/google-genai`
+- [x] Buat `src/agent/graph.ts` — definisi `StateGraph` dengan `AgentState`
+- [x] Implementasi node `load_context`: fetch memory + chat history dari DB
+- [x] Implementasi node `reason`: kirim prompt ke Gemini, parse response
+- [x] Implementasi node `execute_tool`: jalankan tool dari registry, simpan ke `ToolLog`
+- [x] Implementasi node `format_response`: bersihkan output sebelum dikirim
+- [x] Implementasi node `update_memory`: ekstrak fakta baru, upsert ke `Memory`
+- [x] Definisikan edge kondisional: jika ada tool call → `execute_tool`, jika tidak → `format_response`
+- [x] Compile graph dan export sebagai `agentApp`
 
 ### 4.5 Agent Runner
 - [x] Buat `src/agent/runner.ts` — fungsi `runAgent(phoneNumber, incomingMessage)`
-- [~] Orkestrasi: upsert `User`, simpan pesan user ke `Message`, invoke graph, simpan respons
+- [x] Orkestrasi: upsert `User`, simpan pesan user ke `Message`, invoke graph, simpan respons
 - [x] Handle error gracefully: jika agent gagal, kirim pesan fallback ke user
 
 ---
@@ -122,57 +122,57 @@
 ## 🖥️ Domain 6 — Dashboard Admin (Next.js UI)
 
 ### 6.1 Auth
-- [ ] Install & setup NextAuth.js dengan credentials provider
-- [ ] Proteksi semua route `(dashboard)` dengan middleware
-- [ ] Buat halaman `/login`
+- [x] Install & setup NextAuth.js dengan credentials provider
+- [x] Proteksi semua route `(dashboard)` dengan middleware
+- [x] Buat halaman `/login`
 
 ### 6.2 Layout & Navigation
-- [ ] Buat layout `src/app/(dashboard)/layout.tsx` dengan sidebar
-- [ ] Buat komponen `Sidebar` dengan navigasi ke semua halaman
-- [ ] Buat komponen `TopBar` dengan status koneksi WA (badge)
+- [x] Buat layout `src/app/(dashboard)/layout.tsx` dengan sidebar
+- [x] Buat komponen `Sidebar` dengan navigasi ke semua halaman
+- [x] Buat komponen `TopBar` dengan status koneksi WA (badge)
 
 ### 6.3 Halaman Overview
-- [ ] Buat `src/app/(dashboard)/page.tsx`
-- [ ] Widget: total users, total pesan hari ini, avg response time
-- [ ] Widget: status koneksi WA (Connected / Disconnected)
-- [ ] Widget: bot aktif/nonaktif toggle
+- [x] Buat `src/app/(dashboard)/page.tsx`
+- [x] Widget: total users, total pesan hari ini, avg response time
+- [x] Widget: status koneksi WA (Connected / Disconnected)
+- [x] Widget: bot aktif/nonaktif toggle
 
 ### 6.4 Halaman Live Monitor
 - [x] Buat SSE endpoint `src/app/api/sse/route.ts` — stream event pesan baru
-- [ ] Buat halaman `/monitor` — subscribe ke SSE, tampilkan pesan masuk real-time
-- [ ] Filter by phoneNumber / user
+- [x] Buat halaman `/monitor` — subscribe ke SSE, tampilkan pesan masuk real-time
+- [x] Filter by phoneNumber / user
 
 ### 6.5 Halaman Conversations
-- [ ] Buat halaman `/conversations` — list semua user dengan preview pesan terakhir
-- [ ] Klik user → tampilkan full chat history (bubble chat style)
-- [ ] Search by nama / nomor HP
-- [ ] Filter by label, tanggal
+- [x] Buat halaman `/conversations` — list semua user dengan preview pesan terakhir
+- [x] Klik user → tampilkan full chat history (bubble chat style)
+- [x] Search by nama / nomor HP
+- [x] Filter by label, tanggal
 
 ### 6.6 Halaman Users
-- [ ] Buat halaman `/users` — tabel semua user
-- [ ] Aksi per user: lihat detail memori, edit label, block/unblock
-- [ ] Halaman detail `/users/[id]` — tampilkan memory key-value, histori singkat
+- [x] Buat halaman `/users` — tabel semua user
+- [x] Aksi per user: lihat detail memori, edit label, block/unblock
+- [x] Halaman detail `/users/[id]` — tampilkan memory key-value, histori singkat
 
 ### 6.7 Halaman Config
-- [ ] Buat halaman `/config` — editor teks (textarea/CodeMirror) untuk tiap file `.md`
-- [ ] Tombol "Save & Reload" — simpan ke file + trigger hot-reload instruction loader
-- [ ] Tambahkan form edit `BotConfig` (model, maxTokens, isActive)
+- [x] Buat halaman `/config` — editor teks (textarea/CodeMirror) untuk tiap file `.md`
+- [x] Tombol "Save & Reload" — simpan ke file + trigger hot-reload instruction loader
+- [x] Tambahkan form edit `BotConfig` (model, maxTokens, isActive)
 
 ### 6.8 Halaman Tool Logs
-- [ ] Buat halaman `/tool-logs` — tabel log semua pemanggilan tool
-- [ ] Kolom: tool name, input, output, sukses/gagal, durasi, waktu
-- [ ] Filter by tool name, status
+- [x] Buat halaman `/tool-logs` — tabel log semua pemanggilan tool
+- [x] Kolom: tool name, input, output, sukses/gagal, durasi, waktu
+- [x] Filter by tool name, status
 
 ### 6.9 Halaman Analytics
-- [ ] Buat halaman `/analytics`
-- [ ] Chart: volume pesan per hari (7 hari terakhir) — `recharts`
-- [ ] Chart: distribusi tool yang paling sering dipanggil
-- [ ] Tabel: estimasi token usage & biaya Gemini
+- [x] Buat halaman `/analytics`
+- [x] Chart: volume pesan per hari (7 hari terakhir) — `recharts`
+- [x] Chart: distribusi tool yang paling sering dipanggil
+- [x] Tabel: estimasi token usage & biaya Gemini
 
 ### 6.10 Halaman QR Scanner
-- [ ] Buat halaman `/qr` — subscribe SSE untuk QR string
-- [ ] Render QR code di browser dengan library `qrcode.react`
-- [ ] Auto-refresh jika QR expire, tampilkan status "Connecting..."
+- [x] Buat halaman `/qr` — subscribe SSE untuk QR string
+- [x] Render QR code di browser dengan library `qrcode.react`
+- [x] Auto-refresh jika QR expire, tampilkan status "Connecting..."
 
 ---
 
@@ -182,26 +182,26 @@
 - [x] `GET /api/wa/status` — return status koneksi Baileys
 - [x] `POST /api/wa/disconnect` — logout & hapus session
 - [x] `GET /api/sse` — Server-Sent Events untuk live monitor & QR
-- [ ] `GET /api/analytics/summary` — data untuk halaman analytics
-- [ ] Server Actions untuk: update `BotConfig`, block user, update label, upsert memory
+- [x] `GET /api/analytics/summary` — data untuk halaman analytics
+- [x] Server Actions untuk: update `BotConfig`, block user, update label, upsert memory
 
 ---
 
 ## 🧪 Domain 8 — Testing & Deployment
 
 ### 8.1 Testing
-- [ ] Setup Vitest untuk unit test
-- [ ] Test `promptBuilder` — pastikan output prompt sesuai kombinasi MD
-- [ ] Test `memoryRepo` — upsert, get, unique constraint
-- [ ] Test `agentRunner` — mock Gemini, pastikan flow benar
-- [ ] Test tool registry — pastikan tool yang terdaftar bisa dipanggil
+- [~] Setup Vitest untuk unit test
+- [x] Test `promptBuilder` — pastikan output prompt sesuai kombinasi MD
+- [x] Test `memoryRepo` — upsert, get, unique constraint
+- [x] Test `agentRunner` — mock Gemini, pastikan flow benar
+- [x] Test tool registry — pastikan tool yang terdaftar bisa dipanggil
 
 ### 8.2 Deployment
-- [ ] Finalisasi `docker-compose.yml` untuk production (tambah service `app`)
-- [ ] Buat `Dockerfile` untuk Next.js app
-- [ ] Setup environment variables di server / platform deployment
-- [ ] Jalankan `prisma migrate deploy` saat container start
-- [ ] Buat script `start.sh` — migrate + seed + start server
+- [x] Finalisasi `docker-compose.yml` untuk production (tambah service `app`)
+- [x] Buat `Dockerfile` untuk Next.js app
+- [x] Setup environment variables di server / platform deployment
+- [x] Jalankan `prisma migrate deploy` saat container start
+- [x] Buat script `start.sh` — migrate + seed + start server
 - [ ] Test end-to-end: kirim pesan WA → agent respon → tersimpan di DB → muncul di dashboard
 
 ---

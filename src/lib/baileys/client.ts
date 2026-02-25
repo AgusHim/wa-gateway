@@ -11,6 +11,7 @@ import path from "path";
 import fs from "fs";
 import { waEvents } from "./events";
 import { messageQueue } from "../queue/messageQueue";
+import { sessionRepo } from "../db/sessionRepo";
 
 const logger = pino({ level: "silent" });
 
@@ -20,6 +21,45 @@ let retryCount = 0;
 const MAX_RETRIES = 5;
 
 const AUTH_DIR = path.join(process.cwd(), ".wa-auth");
+const SESSION_ID = process.env.WA_SESSION_ID || "main-session";
+
+function ensureDir(pathName: string) {
+    if (!fs.existsSync(pathName)) {
+        fs.mkdirSync(pathName, { recursive: true });
+    }
+}
+
+function listAuthFiles(dirPath: string): string[] {
+    if (!fs.existsSync(dirPath)) return [];
+    return fs.readdirSync(dirPath).filter((entry) => {
+        const fullPath = path.join(dirPath, entry);
+        return fs.statSync(fullPath).isFile();
+    });
+}
+
+async function restoreAuthFromDb(): Promise<void> {
+    const session = await sessionRepo.getSession(SESSION_ID);
+    if (!session?.data) return;
+
+    ensureDir(AUTH_DIR);
+    const files = JSON.parse(session.data) as Record<string, string>;
+
+    for (const [fileName, content] of Object.entries(files)) {
+        fs.writeFileSync(path.join(AUTH_DIR, fileName), content, "utf-8");
+    }
+}
+
+async function backupAuthToDb(): Promise<void> {
+    ensureDir(AUTH_DIR);
+    const files = listAuthFiles(AUTH_DIR);
+    const payload: Record<string, string> = {};
+
+    for (const fileName of files) {
+        payload[fileName] = fs.readFileSync(path.join(AUTH_DIR, fileName), "utf-8");
+    }
+
+    await sessionRepo.saveSession(SESSION_ID, JSON.stringify(payload));
+}
 
 export function getConnectionStatus() {
     return connectionStatus;
@@ -30,6 +70,7 @@ export function getSocket(): WASocket | null {
 }
 
 export async function connectToWhatsApp(): Promise<void> {
+    await restoreAuthFromDb();
     const { state, saveCreds } = await loadMultiFileAuthState(AUTH_DIR);
     const { version } = await fetchLatestBaileysVersion();
 
@@ -68,6 +109,7 @@ export async function connectToWhatsApp(): Promise<void> {
             } else if (reason === DisconnectReason.loggedOut) {
                 console.log("[WA] Session logged out. Please scan QR code again.");
                 retryCount = 0;
+                await sessionRepo.deleteSession(SESSION_ID);
             } else {
                 console.error("[WA] Max retries reached. Please restart manually.");
             }
@@ -87,7 +129,10 @@ export async function connectToWhatsApp(): Promise<void> {
     });
 
     // Save credentials on update
-    sock.ev.on("creds.update", saveCreds);
+    sock.ev.on("creds.update", async () => {
+        await saveCreds();
+        await backupAuthToDb();
+    });
 
     // Message handler
     sock.ev.on("messages.upsert", async ({ messages, type }) => {
@@ -173,6 +218,7 @@ export async function disconnectWhatsApp(): Promise<void> {
         if (fs.existsSync(AUTH_DIR)) {
             fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         }
+        await sessionRepo.deleteSession(SESSION_ID);
         console.log("[WA] Disconnected");
     }
 }
