@@ -6,6 +6,7 @@ import { authOptions } from "@/lib/auth";
 import { configRepo } from "@/lib/db/configRepo";
 import { memoryRepo } from "@/lib/db/memoryRepo";
 import { userRepo } from "@/lib/db/userRepo";
+import { handoverRepo } from "@/lib/handover/repo";
 import { getInstructionFiles, reloadInstructions, updateInstruction } from "@/lib/instructions/loader";
 
 async function requireSession() {
@@ -90,6 +91,24 @@ export async function toggleUserBlockAction(formData: FormData) {
 
     await userRepo.blockUser(userId, nextBlocked);
     revalidatePath("/users");
+}
+
+export async function resolveUserHandoverAction(formData: FormData) {
+    await requireSession();
+
+    const userId = String(formData.get("userId") || "");
+    if (!userId) {
+        throw new Error("Invalid user");
+    }
+
+    const user = await userRepo.getUserById(userId);
+    if (!user) {
+        throw new Error("User not found");
+    }
+
+    await handoverRepo.clearPending(user.phoneNumber);
+    revalidatePath("/users");
+    revalidatePath("/conversations");
 }
 
 export async function upsertUserMemoryAction(formData: FormData) {

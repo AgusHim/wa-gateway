@@ -16,4 +16,18 @@ export const sessionRepo = {
     async deleteSession(id: string) {
         return prisma.session.deleteMany({ where: { id } });
     },
+
+    async listSessionsByPrefix(prefix: string) {
+        return prisma.session.findMany({
+            where: {
+                id: {
+                    startsWith: prefix,
+                },
+            },
+            select: {
+                id: true,
+                data: true,
+            },
+        });
+    },
 };

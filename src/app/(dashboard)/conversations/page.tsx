@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { messageRepo } from "@/lib/db/messageRepo";
 import { userRepo } from "@/lib/db/userRepo";
+import { handoverRepo } from "@/lib/handover/repo";
+import { resolveUserHandoverAction } from "../actions";
 
 type SearchParams = {
     q?: string;
@@ -36,6 +38,9 @@ export default async function ConversationsPage({
     const messages = selectedUser
         ? await messageRepo.getConversation(selectedUser.id, 1, 200)
         : [];
+    const selectedUserHandoverPending = selectedUser
+        ? await handoverRepo.isPending(selectedUser.phoneNumber)
+        : false;
 
     return (
         <section className="space-y-4">
@@ -126,6 +131,22 @@ export default async function ConversationsPage({
                             {selectedUser ? selectedUser.name || "Tanpa Nama" : "Pilih user"}
                         </p>
                         <p className="text-xs text-slate-500">{selectedUser?.phoneNumber || "-"}</p>
+                        {selectedUser && selectedUserHandoverPending ? (
+                            <div className="mt-2 flex items-center gap-2">
+                                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">
+                                    Handover Pending
+                                </span>
+                                <form action={resolveUserHandoverAction}>
+                                    <input type="hidden" name="userId" value={selectedUser.id} />
+                                    <button
+                                        type="submit"
+                                        className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-500"
+                                    >
+                                        Resolve Handover
+                                    </button>
+                                </form>
+                            </div>
+                        ) : null}
                     </div>
 
                     <div className="max-h-[70vh] space-y-3 overflow-auto p-4">

@@ -46,6 +46,52 @@ function toRecipientJid(identifier: string): string {
     return `${identifier}@s.whatsapp.net`;
 }
 
+function toPhoneIdentifier(remoteJid: string): string {
+    if (remoteJid.endsWith("@s.whatsapp.net")) {
+        return remoteJid.replace("@s.whatsapp.net", "");
+    }
+    if (remoteJid.includes("@")) {
+        // Keep non-phone JIDs (e.g. @lid) as-is so routing stays valid.
+        return normalizeJid(remoteJid);
+    }
+    return remoteJid;
+}
+
+function getMessageText(msg: {
+    message?: {
+        conversation?: string | null;
+        extendedTextMessage?: { text?: string | null } | null;
+    } | null;
+}): string {
+    return msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
+}
+
+async function handleManualOperatorMessage(remoteJid: string, messageText: string): Promise<void> {
+    const phoneNumber = toPhoneIdentifier(remoteJid);
+    if (!phoneNumber) return;
+
+    const [{ userRepo }, { messageRepo }, { handoverRepo }] = await Promise.all([
+        import("../db/userRepo"),
+        import("../db/messageRepo"),
+        import("../handover/repo"),
+    ]);
+
+    const user = await userRepo.upsertUser(phoneNumber);
+
+    if (messageText.trim()) {
+        await messageRepo.saveMessage({
+            userId: user.id,
+            role: "assistant",
+            content: messageText,
+            metadata: {
+                source: "human-operator",
+            },
+        });
+    }
+
+    await handoverRepo.clearPending(phoneNumber);
+}
+
 function listAuthFiles(dirPath: string): string[] {
     if (!fs.existsSync(dirPath)) return [];
     return fs.readdirSync(dirPath).filter((entry) => {
@@ -196,37 +242,38 @@ export async function connectToWhatsApp(): Promise<void> {
         if (type !== "notify") return;
 
         for (const msg of messages) {
+            const remoteJid = msg.key.remoteJid ?? "";
+            const messageText = getMessageText(msg);
+
             // Allow self-chat testing:
             // - process messages from connected number only in self-chat
             // - ignore messages that were sent by this gateway to avoid loops
             if (msg.key.fromMe) {
                 const ownJid = getOwnJid();
-                const isSelfChat = Boolean(ownJid) && msg.key.remoteJid === ownJid;
+                const isSelfChat = Boolean(ownJid) && remoteJid === ownJid;
                 const sentByGateway = Boolean(msg.key.id) && recentlySentMessageIds.has(msg.key.id as string);
 
-                if (sentByGateway || !isSelfChat) {
+                if (sentByGateway) {
+                    continue;
+                }
+
+                if (!isSelfChat) {
+                    try {
+                        await handleManualOperatorMessage(remoteJid, messageText);
+                    } catch (error) {
+                        console.error("[WA] Failed to process manual operator message:", error);
+                    }
                     continue;
                 }
             }
 
             // Ignore group messages (optional — uncomment to allow groups)
-            if (msg.key.remoteJid?.endsWith("@g.us")) continue;
+            if (remoteJid.endsWith("@g.us")) continue;
 
             // Ignore status broadcasts
-            if (msg.key.remoteJid === "status@broadcast") continue;
+            if (remoteJid === "status@broadcast") continue;
 
-            const remoteJid = msg.key.remoteJid ?? "";
-            let phoneNumber = remoteJid;
-            if (remoteJid.endsWith("@s.whatsapp.net")) {
-                phoneNumber = remoteJid.replace("@s.whatsapp.net", "");
-            } else if (remoteJid.includes("@")) {
-                // Keep non-phone JIDs (e.g. @lid) as-is so reply routing stays valid.
-                phoneNumber = normalizeJid(remoteJid);
-            }
-            const messageText =
-                msg.message?.conversation ||
-                msg.message?.extendedTextMessage?.text ||
-                "";
+            const phoneNumber = toPhoneIdentifier(remoteJid);
 
             if (!messageText || !phoneNumber) continue;
 
@@ -259,14 +306,20 @@ export async function connectToWhatsApp(): Promise<void> {
     });
 }
 
-export async function sendMessage(phoneNumber: string, text: string): Promise<void> {
+export async function sendMessage(
+    phoneNumber: string,
+    text: string,
+    options?: { withTyping?: boolean }
+): Promise<void> {
     if (!sock) {
         throw new Error("[WA] Socket not connected");
     }
 
     const jid = toRecipientJid(phoneNumber);
 
-    await sendTyping(phoneNumber, text.length);
+    if (options?.withTyping ?? true) {
+        await sendTyping(phoneNumber, text.length);
+    }
     const sent = await sock.sendMessage(jid, { text });
     trackSentMessage(sent?.key?.id);
 }

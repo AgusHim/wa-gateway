@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { toggleUserBlockAction, updateUserLabelAction } from "../actions";
+import { resolveUserHandoverAction, toggleUserBlockAction, updateUserLabelAction } from "../actions";
 import { userRepo } from "@/lib/db/userRepo";
+import { handoverRepo } from "@/lib/handover/repo";
 
 type SearchParams = {
     q?: string;
@@ -30,6 +31,7 @@ export default async function UsersPage({
         userRepo.getUsersForDashboard({ query, label, dateFrom, dateTo }),
         userRepo.getDistinctLabels(),
     ]);
+    const handoverPendingSet = await handoverRepo.getPendingPhoneSet(users.map((user) => user.phoneNumber));
 
     return (
         <section className="space-y-4">
@@ -119,6 +121,11 @@ export default async function UsersPage({
                                         </form>
                                     </td>
                                     <td className="px-4 py-3">
+                                        {handoverPendingSet.has(user.phoneNumber) ? (
+                                            <span className="mr-2 rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">
+                                                Handover Pending
+                                            </span>
+                                        ) : null}
                                         <span
                                             className={`rounded-full px-2 py-1 text-xs ${
                                                 user.isBlocked
@@ -150,6 +157,18 @@ export default async function UsersPage({
                                                     {user.isBlocked ? "Unblock" : "Block"}
                                                 </button>
                                             </form>
+
+                                            {handoverPendingSet.has(user.phoneNumber) ? (
+                                                <form action={resolveUserHandoverAction}>
+                                                    <input type="hidden" name="userId" value={user.id} />
+                                                    <button
+                                                        type="submit"
+                                                        className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-500"
+                                                    >
+                                                        Resolve Handover
+                                                    </button>
+                                                </form>
+                                            ) : null}
 
                                             <Link
                                                 href={`/users/${user.id}`}
