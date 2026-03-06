@@ -1,25 +1,39 @@
 # Tools
 
-## Available Tools
+## Prinsip Umum Penggunaan Tool
+- Pakai tool hanya saat memang dibutuhkan untuk meningkatkan akurasi atau eksekusi.
+- Validasi parameter sebelum eksekusi.
+- Jangan memaparkan data sensitif ke user.
+- Jika tool gagal, jelaskan secara ringkas dan beri opsi tindak lanjut.
+
+## Daftar Tool Default
 
 ### get_user_info
-- **Description**: Ambil informasi user dari database
-- **Parameters**: phoneNumber (string)
-- **Returns**: User data termasuk nama, label, dan memori
+- Tujuan: Mengambil data user dari database berdasarkan nomor telepon.
+- Kapan dipakai: Saat perlu profil user sebelum memberi jawaban personal.
 
 ### save_note
-- **Description**: Simpan catatan/fakta baru tentang user ke memori
-- **Parameters**: key (string), value (string)
-- **Returns**: Konfirmasi data tersimpan
+- Tujuan: Menyimpan fakta penting user ke memory jangka panjang.
+- Kapan dipakai: Saat user memberi informasi profil/preferensi yang stabil.
 
 ### fetch_smartscholar_endpoint
-- **Description**: Ambil data endpoint SmartScholar via HTTP (mirip curl/browser)
-- **Parameters**:
-  - `method` (string, opsional): `GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS` (default: `GET`)
-  - `endpoint` (string, wajib): path atau URL endpoint. Contoh: `/api/plans`, `/admin_api/orders`
-  - `query` (string, opsional): query string, contoh `page=1&limit=20`
-  - `authMode` (string, opsional): `auto` | `none` | `bearer` | `cookie` | `api_key`
-  - `headersJson` (string, opsional): JSON object string untuk header tambahan
-  - `bodyJson` (string, opsional): JSON string untuk body request method non-GET
-  - `bodyText` (string, opsional): raw text body request method non-GET
-- **Returns**: Status HTTP, URL final, dan preview body response
+- Tujuan: Melakukan request HTTP ke endpoint yang diizinkan tenant.
+- Kapan dipakai: Saat butuh data dinamis real-time dari sistem eksternal.
+- Catatan: Tenant bisa mengganti base URL/credential sesuai integrasi masing-masing.
+
+### webhook_action
+- Tujuan: Men-trigger webhook/action eksternal untuk automasi proses bisnis.
+- Kapan dipakai: Saat percakapan perlu memicu workflow downstream.
+
+### crm_sync_contact
+- Tujuan: Sinkronisasi data kontak user ke CRM tenant.
+- Kapan dipakai: Saat onboarding lead atau update profil pelanggan.
+
+### search_knowledge
+- Tujuan: Mencari jawaban dari knowledge base tenant.
+- Kapan dipakai: Saat user bertanya soal SOP, produk, atau kebijakan internal.
+
+## Aturan Keamanan
+- Hormati policy role dan pembatasan tool per workspace.
+- Jangan menjalankan aksi destruktif tanpa konteks yang jelas.
+- Selalu utamakan idempotency untuk action yang bisa dipanggil berulang.

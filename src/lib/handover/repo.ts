@@ -1,92 +1,182 @@
-import { sessionRepo } from "@/lib/db/sessionRepo";
+import { HandoverTicketStatus } from "@prisma/client";
+import { prisma } from "@/lib/db/client";
+import { assertTenantScope } from "@/lib/tenant/context";
 
 type HumanHandoverState = {
     pending: boolean;
     topic?: string;
     keyword?: string;
     triggeredAt: string;
+    slaDueAt?: string;
+    status?: HandoverTicketStatus;
     lastUserMessage?: string;
 };
-
-const HANDOVER_PREFIX = "human-handover:";
-
-function keyForPhone(phoneNumber: string): string {
-    return `${HANDOVER_PREFIX}${phoneNumber}`;
-}
 
 function normalizePhoneIdentifier(input: string): string {
     return input.trim();
 }
 
+function resolveSlaMinutes(): number {
+    const raw = Number(process.env.HANDOVER_SLA_MINUTES || 30);
+    if (!Number.isFinite(raw)) {
+        return 30;
+    }
+    return Math.max(1, Math.min(24 * 60, Math.round(raw)));
+}
+
+function computeSlaDueAt(triggeredAt: Date): Date {
+    const minutes = resolveSlaMinutes();
+    return new Date(triggeredAt.getTime() + minutes * 60 * 1000);
+}
+
 export const handoverRepo = {
-    async getState(phoneNumber: string): Promise<HumanHandoverState | null> {
+    async getState(phoneNumber: string, workspaceId: string): Promise<HumanHandoverState | null> {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
         const normalized = normalizePhoneIdentifier(phoneNumber);
         if (!normalized) return null;
 
-        const row = await sessionRepo.getSession(keyForPhone(normalized));
-        if (!row?.data) return null;
+        const ticket = await prisma.handoverTicket.findFirst({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                phoneNumber: normalized,
+                status: HandoverTicketStatus.OPEN,
+            },
+            orderBy: [{ createdAt: "desc" }],
+        });
 
-        try {
-            return JSON.parse(row.data) as HumanHandoverState;
-        } catch {
+        if (!ticket) {
             return null;
         }
+
+        return {
+            pending: true,
+            topic: ticket.topic || undefined,
+            keyword: ticket.keyword || undefined,
+            triggeredAt: ticket.createdAt.toISOString(),
+            slaDueAt: ticket.slaDueAt.toISOString(),
+            status: ticket.status,
+            lastUserMessage: ticket.lastUserMessage || undefined,
+        };
     },
 
-    async isPending(phoneNumber: string): Promise<boolean> {
-        const state = await this.getState(phoneNumber);
+    async isPending(phoneNumber: string, workspaceId: string): Promise<boolean> {
+        const state = await this.getState(phoneNumber, workspaceId);
         return Boolean(state?.pending);
     },
 
     async markPending(input: {
+        workspaceId: string;
         phoneNumber: string;
+        userId?: string;
         topic?: string;
         keyword?: string;
+        triggeredBy?: string;
+        priority?: string;
         lastUserMessage?: string;
     }): Promise<void> {
+        const resolvedWorkspaceId = assertTenantScope(input.workspaceId);
         const normalized = normalizePhoneIdentifier(input.phoneNumber);
         if (!normalized) return;
 
-        const payload: HumanHandoverState = {
-            pending: true,
-            topic: input.topic,
-            keyword: input.keyword,
-            triggeredAt: new Date().toISOString(),
-            lastUserMessage: input.lastUserMessage,
-        };
+        const existing = await prisma.handoverTicket.findFirst({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                phoneNumber: normalized,
+                status: HandoverTicketStatus.OPEN,
+            },
+            orderBy: [{ createdAt: "desc" }],
+            select: { id: true },
+        });
 
-        await sessionRepo.saveSession(keyForPhone(normalized), JSON.stringify(payload));
+        if (existing) {
+            await prisma.handoverTicket.update({
+                where: { id: existing.id },
+                data: {
+                    topic: input.topic,
+                    keyword: input.keyword,
+                    triggeredBy: input.triggeredBy,
+                    priority: input.priority || "normal",
+                    lastUserMessage: input.lastUserMessage,
+                    updatedAt: new Date(),
+                },
+            });
+            return;
+        }
+
+        const now = new Date();
+        await prisma.handoverTicket.create({
+            data: {
+                workspaceId: resolvedWorkspaceId,
+                userId: input.userId || null,
+                phoneNumber: normalized,
+                topic: input.topic,
+                keyword: input.keyword,
+                triggeredBy: input.triggeredBy,
+                priority: input.priority || "normal",
+                status: HandoverTicketStatus.OPEN,
+                slaDueAt: computeSlaDueAt(now),
+                lastUserMessage: input.lastUserMessage,
+            },
+        });
     },
 
-    async clearPending(phoneNumber: string): Promise<void> {
+    async clearPending(phoneNumber: string, workspaceId: string): Promise<void> {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
         const normalized = normalizePhoneIdentifier(phoneNumber);
         if (!normalized) return;
 
-        await sessionRepo.deleteSession(keyForPhone(normalized));
+        await prisma.handoverTicket.updateMany({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                phoneNumber: normalized,
+                status: HandoverTicketStatus.OPEN,
+            },
+            data: {
+                status: HandoverTicketStatus.RESOLVED,
+                resolvedAt: new Date(),
+                firstResponseAt: new Date(),
+            },
+        });
     },
 
-    async getPendingPhoneSet(phoneNumbers?: string[]): Promise<Set<string>> {
-        const rows = await sessionRepo.listSessionsByPrefix(HANDOVER_PREFIX);
+    async getPendingPhoneSet(phoneNumbers: string[] | undefined, workspaceId: string): Promise<Set<string>> {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
         const filter = phoneNumbers?.length
-            ? new Set(phoneNumbers.map((item) => normalizePhoneIdentifier(item)).filter(Boolean))
-            : null;
-        const pending = new Set<string>();
+            ? Array.from(new Set(phoneNumbers.map((item) => normalizePhoneIdentifier(item)).filter(Boolean)))
+            : undefined;
 
-        for (const row of rows) {
-            const phone = row.id.slice(HANDOVER_PREFIX.length).trim();
-            if (!phone) continue;
-            if (filter && !filter.has(phone)) continue;
+        const rows = await prisma.handoverTicket.findMany({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                status: HandoverTicketStatus.OPEN,
+                phoneNumber: filter ? { in: filter } : undefined,
+            },
+            select: { phoneNumber: true },
+        });
 
-            try {
-                const state = JSON.parse(row.data) as HumanHandoverState;
-                if (state.pending) {
-                    pending.add(phone);
-                }
-            } catch {
-                continue;
-            }
-        }
+        return new Set(rows.map((row) => row.phoneNumber));
+    },
 
-        return pending;
+    async listOpenTickets(workspaceId: string, limit: number = 100) {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
+
+        return prisma.handoverTicket.findMany({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                status: HandoverTicketStatus.OPEN,
+            },
+            orderBy: [{ slaDueAt: "asc" }, { createdAt: "asc" }],
+            take: Math.max(1, Math.min(1000, Math.round(limit))),
+            include: {
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        phoneNumber: true,
+                        label: true,
+                    },
+                },
+            },
+        });
     },
 };

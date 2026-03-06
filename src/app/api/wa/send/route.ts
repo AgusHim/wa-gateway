@@ -1,4 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { UsageMetric } from "@prisma/client";
+import { authenticateApiRequest } from "@/lib/security/apiAuth";
+import { billingService } from "@/lib/billing/service";
+import { channelRepo } from "@/lib/db/channelRepo";
+import { getOutboundSendQueue } from "@/lib/queue/messageQueue";
+import { evaluateOutboundPolicy } from "@/lib/wa/compliance";
+import { getDefaultTenantContext } from "@/lib/tenant/context";
+import { generateCorrelationId, generateTraceId } from "@/lib/observability/trace";
+import { getWorkspaceRuntimeFlags } from "@/lib/tenant/flags";
 
 export const runtime = "nodejs";
 
@@ -24,27 +33,28 @@ function normalizePhoneIdentifier(raw: string): string {
     return digits;
 }
 
-function isAuthorized(request: NextRequest): boolean {
-    const expectedApiKey = (process.env.WA_GATEWAY_API_KEY || "").trim();
-    if (!expectedApiKey) return true;
+function resolveMode(rawMode: string): "chat" | "broadcast" | "notification" {
+    if (rawMode === "broadcast" || rawMode === "notification") {
+        return rawMode;
+    }
 
-    const headerApiKey = (request.headers.get("x-api-key") || "").trim();
-    const authHeader = (request.headers.get("authorization") || "").trim();
-    const bearerToken = authHeader.toLowerCase().startsWith("bearer ")
-        ? authHeader.slice(7).trim()
-        : "";
-
-    return headerApiKey === expectedApiKey || bearerToken === expectedApiKey;
+    return "chat";
 }
 
 export async function POST(request: NextRequest) {
-    if (!isAuthorized(request)) {
+    const traceId = request.headers.get("x-trace-id")?.trim() || generateTraceId();
+    const correlationId = request.headers.get("x-correlation-id")?.trim() || generateCorrelationId();
+
+    const auth = await authenticateApiRequest(request, {
+        requiredScopes: ["wa:send"],
+    });
+    if (!auth.ok) {
         return NextResponse.json(
             {
                 success: false,
-                message: "Unauthorized",
+                message: auth.message,
             },
-            { status: 401 }
+            { status: auth.status }
         );
     }
 
@@ -62,10 +72,14 @@ export async function POST(request: NextRequest) {
     }
 
     const rawPhoneNumber =
-        getStringValue(payload.phoneNumber) ||
-        getStringValue(payload.phone_number) ||
-        getStringValue(payload.to);
+        getStringValue(payload.phoneNumber)
+        || getStringValue(payload.phone_number)
+        || getStringValue(payload.to);
     const text = getStringValue(payload.text) || getStringValue(payload.message);
+    const workspaceIdPayload = getStringValue(payload.workspaceId);
+    const channelIdPayload = getStringValue(payload.channelId);
+    const mode = resolveMode(getStringValue(payload.mode).toLowerCase());
+    const templateId = getStringValue(payload.templateId) || undefined;
 
     if (!rawPhoneNumber) {
         return NextResponse.json(
@@ -108,34 +122,110 @@ export async function POST(request: NextRequest) {
         );
     }
 
-    const [{ ensureGatewayBootstrapped }, { sendMessage, sendTyping }] = await Promise.all([
-        import("@/lib/runtime/bootstrapServer"),
-        import("@/lib/baileys/client"),
-    ]);
+    const { workspaceId: defaultWorkspaceId } = getDefaultTenantContext();
+    const workspaceId = workspaceIdPayload || defaultWorkspaceId;
+    const runtimeFlags = await getWorkspaceRuntimeFlags(workspaceId);
+    if (!runtimeFlags.allowOutbound) {
+        return NextResponse.json(
+            {
+                success: false,
+                message: "Workspace outbound is disabled",
+            },
+            { status: 403 }
+        );
+    }
 
+    const channel = channelIdPayload
+        ? await channelRepo.getWorkspaceChannel(workspaceId, channelIdPayload)
+        : await channelRepo.getPrimaryWorkspaceChannel(workspaceId);
+
+    if (!channel || !channel.isEnabled || channel.status === "removed") {
+        return NextResponse.json(
+            {
+                success: false,
+                message: "No active channel available",
+            },
+            { status: 400 }
+        );
+    }
+
+    const policyResult = await evaluateOutboundPolicy({
+        workspaceId,
+        channelId: channel.id,
+        phoneNumber,
+        mode,
+        templateId,
+    });
+
+    if (!policyResult.ok) {
+        return NextResponse.json(
+            {
+                success: false,
+                message: policyResult.message || "Outbound policy rejected",
+                data: {
+                    violations: policyResult.violations,
+                },
+            },
+            { status: 403 }
+        );
+    }
+
+    const outboundLimit = await billingService.evaluateUsageLimit(workspaceId, UsageMetric.OUTBOUND_MESSAGE, 1);
+    if (!outboundLimit.allowed) {
+        return NextResponse.json(
+            {
+                success: false,
+                message: "Outbound message limit reached for current billing cycle",
+            },
+            { status: 402 }
+        );
+    }
+
+    const { ensureGatewayBootstrapped } = await import("@/lib/runtime/bootstrapServer");
     await ensureGatewayBootstrapped();
 
+    const { ensureOutboundPartitionWorker } = await import("@/agent/bootstrap");
+    ensureOutboundPartitionWorker(workspaceId, channel.id);
+
     try {
-        await sendTyping(phoneNumber, text.length);
-        await sendMessage(phoneNumber, text, { withTyping: false });
+        const queue = getOutboundSendQueue(workspaceId, channel.id);
+        const queuedJob = await queue.add(`api-send:${channel.id}`, {
+            workspaceId,
+            channelId: channel.id,
+            phoneNumber,
+            text,
+            mode,
+            templateId,
+            requestedAt: Date.now(),
+            traceId,
+            correlationId,
+        });
+
+        return NextResponse.json(
+            {
+                success: true,
+                message: "Message queued",
+                data: {
+                    workspaceId,
+                    channelId: channel.id,
+                    phoneNumber,
+                    mode,
+                    jobId: queuedJob.id,
+                    traceId,
+                    correlationId,
+                },
+            },
+            { status: 202 }
+        );
     } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to send WhatsApp message";
-        const isDisconnected = message.includes("Socket not connected");
+        const message = error instanceof Error ? error.message : "Failed to queue WhatsApp message";
 
         return NextResponse.json(
             {
                 success: false,
                 message,
             },
-            { status: isDisconnected ? 503 : 500 }
+            { status: 500 }
         );
     }
-
-    return NextResponse.json({
-        success: true,
-        message: "Message sent",
-        data: {
-            phoneNumber,
-        },
-    });
 }

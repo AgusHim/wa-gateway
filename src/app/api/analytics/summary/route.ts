@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
+import { requireApiSession } from "@/lib/auth/apiSession";
 import { toolLogRepo } from "@/lib/db/toolLogRepo";
+import type { AnalyticsSummary, AnalyticsTokenUsage } from "@/types/dashboard";
 
 export const runtime = "nodejs";
-
-type TokenStats = {
-    model: string;
-    totalTokens: number;
-    estimatedCostUsd: number;
-};
 
 function toDayKey(date: Date): string {
     return date.toISOString().slice(0, 10);
@@ -18,7 +14,20 @@ function readNumber(value: unknown): number {
     return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (typeof value !== "object" || value === null) {
+        return null;
+    }
+    return value as Record<string, unknown>;
+}
+
 export async function GET() {
+    const auth = await requireApiSession("read");
+    if (!auth.ok) {
+        return auth.response;
+    }
+
+    const { workspaceId } = auth.context;
     const days = 7;
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -26,13 +35,20 @@ export async function GET() {
 
     const [messages, toolUsage, assistantMessages] = await Promise.all([
         prisma.message.findMany({
-            where: { createdAt: { gte: start } },
+            where: {
+                workspaceId,
+                createdAt: { gte: start },
+            },
             select: { createdAt: true },
             orderBy: { createdAt: "asc" },
         }),
-        toolLogRepo.getToolUsageSummary(),
+        toolLogRepo.getToolUsageSummary(workspaceId),
         prisma.message.findMany({
-            where: { role: "assistant", createdAt: { gte: start } },
+            where: {
+                workspaceId,
+                role: "assistant",
+                createdAt: { gte: start },
+            },
             select: { metadata: true },
         }),
     ]);
@@ -51,7 +67,11 @@ export async function GET() {
 
     const tokenByModel = new Map<string, number>();
     for (const message of assistantMessages) {
-        const metadata = (message.metadata ?? {}) as Record<string, unknown>;
+        const metadata = asRecord(message.metadata);
+        if (!metadata) {
+            continue;
+        }
+
         const model = String(metadata.model ?? metadata.modelName ?? "unknown");
         const tokenCount =
             readNumber(metadata.totalTokens)
@@ -63,18 +83,20 @@ export async function GET() {
         }
     }
 
-    const tokenStats: TokenStats[] = Array.from(tokenByModel.entries()).map(([model, totalTokens]) => ({
+    const tokenStats: AnalyticsTokenUsage[] = Array.from(tokenByModel.entries()).map(([model, totalTokens]) => ({
         model,
         totalTokens,
         estimatedCostUsd: Number(((totalTokens / 1_000_000) * 0.1).toFixed(4)),
     }));
 
-    return NextResponse.json({
+    const response: AnalyticsSummary = {
         messageVolume: Array.from(volumeMap.entries()).map(([date, count]) => ({ date, count })),
         topTools: toolUsage.map((item) => ({
             toolName: item.toolName,
             count: item._count.toolName,
         })),
         tokenUsage: tokenStats,
-    });
+    };
+
+    return NextResponse.json(response);
 }

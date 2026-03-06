@@ -1,6 +1,10 @@
 /**
  * Tool interface — all tools must implement this.
  */
+import { TenantRole, UsageMetric } from "@prisma/client";
+import { CircuitBreakerOpenError, executeWithCircuitBreaker } from "../../lib/resilience/circuitBreaker";
+import { logWarn } from "../../lib/observability/logger";
+
 export interface Tool {
     name: string;
     description: string;
@@ -13,8 +17,11 @@ export interface Tool {
 }
 
 export interface ToolContext {
+    workspaceId: string;
     userId: string;
+    channelId?: string;
     phoneNumber: string;
+    actorRole?: TenantRole;
 }
 
 // Tool registry map
@@ -73,15 +80,85 @@ export async function executeTool(
         return `Tool "${name}" not found.`;
     }
 
+    if (process.env.NODE_ENV !== "test") {
+        const { workspaceToolPolicyRepo } = await import("@/lib/db/workspaceToolPolicyRepo");
+        const actorRole = context.actorRole ?? TenantRole.OPERATOR;
+        const policy = await workspaceToolPolicyRepo.evaluatePolicy(context.workspaceId, name, actorRole);
+
+        if (!policy.allowed) {
+            if (!policy.isEnabled) {
+                return `Tool "${name}" sedang dinonaktifkan untuk workspace ini.`;
+            }
+
+            return `Role ${actorRole} tidak memiliki akses untuk tool "${name}".`;
+        }
+    }
+
+    if (process.env.NODE_ENV !== "test") {
+        const { billingService } = await import("../../lib/billing/service");
+        const toolQuota = await billingService.consumeUsage({
+            workspaceId: context.workspaceId,
+            channelId: context.channelId,
+            metric: UsageMetric.TOOL_CALL,
+            quantity: 1,
+            referenceId: context.userId,
+            metadata: {
+                toolName: name,
+                phase: "pre-execution",
+                actorRole: context.actorRole ?? TenantRole.OPERATOR,
+            },
+        });
+
+        if (!toolQuota.allowed) {
+            return "Batas pemakaian tool untuk paket saat ini sudah habis. Silakan upgrade plan.";
+        }
+    }
+
     const startTime = Date.now();
     let result: string;
     let success = true;
 
     try {
-        result = await tool.execute(params, context);
+        result = await executeWithCircuitBreaker(
+            `tool:${context.workspaceId}:${name}`,
+            async () => tool.execute(params, context),
+            {
+                failureThreshold: 3,
+                resetTimeoutMs: 20_000,
+                successThreshold: 1,
+            }
+        );
     } catch (error) {
         success = false;
-        result = `Error executing tool "${name}": ${error instanceof Error ? error.message : "Unknown error"}`;
+        if (error instanceof CircuitBreakerOpenError) {
+            result = `Tool "${name}" sedang cooldown karena gagal berulang. Coba lagi dalam ${Math.ceil(error.retryAfterMs / 1000)} detik.`;
+            logWarn("tool.execution.blocked_by_circuit_breaker", {
+                workspaceId: context.workspaceId,
+                toolName: name,
+                retryAfterMs: error.retryAfterMs,
+            });
+        } else {
+            const message = error instanceof Error ? error.message : "Unknown error";
+            result = `Error executing tool "${name}": ${message}`;
+
+            if (process.env.NODE_ENV !== "test") {
+                import("@/lib/integrations/webhookService")
+                    .then(({ webhookService }) => webhookService.enqueueEvent({
+                        workspaceId: context.workspaceId,
+                        eventType: "TOOL_FAILED",
+                        payload: {
+                            toolName: name,
+                            userId: context.userId,
+                            phoneNumber: context.phoneNumber,
+                            channelId: context.channelId || null,
+                            actorRole: context.actorRole || null,
+                            input: params,
+                            error: message,
+                        },
+                    }))
+                    .catch(console.error);
+            }
+        }
     }
 
     const duration = Date.now() - startTime;
@@ -90,12 +167,13 @@ export async function executeTool(
     if (process.env.NODE_ENV !== "test") {
         import("../../lib/db/toolLogRepo")
             .then(({ toolLogRepo }) => toolLogRepo.saveToolLog({
-                toolName: name,
-                input: params,
-                output: { result },
-                success,
-                duration,
-            }))
+                    workspaceId: context.workspaceId,
+                    toolName: name,
+                    input: params,
+                    output: { result },
+                    success,
+                    duration,
+                }))
             .catch(console.error);
     }
 

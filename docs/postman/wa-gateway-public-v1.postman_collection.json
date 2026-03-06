@@ -1,0 +1,84 @@
+{
+  "info": {
+    "_postman_id": "e2b341aa-f0c8-4eb3-8fd8-1cf88c2d2d01",
+    "name": "WA Gateway Public API v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Send Message",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-KEY", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"phoneNumber\": \"628123456789\",\n  \"text\": \"Halo dari public API\",\n  \"mode\": \"chat\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/public/v1/messages/send",
+          "host": [ "{{base_url}}" ],
+          "path": [ "api", "public", "v1", "messages", "send" ]
+        }
+      }
+    },
+    {
+      "name": "Sync Contacts",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "X-API-KEY", "value": "{{api_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"contacts\": [\n    {\n      \"phoneNumber\": \"628123456789\",\n      \"name\": \"Budi\",\n      \"label\": \"lead\",\n      \"segments\": [\"sales-lead\"]\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/public/v1/contacts/sync",
+          "host": [ "{{base_url}}" ],
+          "path": [ "api", "public", "v1", "contacts", "sync" ]
+        }
+      }
+    },
+    {
+      "name": "Read Conversations",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-API-KEY", "value": "{{api_key}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/public/v1/conversations?phoneNumber=628123456789&limit=50&page=1",
+          "host": [ "{{base_url}}" ],
+          "path": [ "api", "public", "v1", "conversations" ],
+          "query": [
+            { "key": "phoneNumber", "value": "628123456789" },
+            { "key": "limit", "value": "50" },
+            { "key": "page", "value": "1" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Read Usage Snapshot",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "X-API-KEY", "value": "{{api_key}}" }
+        ],
+        "url": {
+          "raw": "{{base_url}}/api/public/v1/usage",
+          "host": [ "{{base_url}}" ],
+          "path": [ "api", "public", "v1", "usage" ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000" },
+    { "key": "api_key", "value": "" }
+  ]
+}

@@ -15,7 +15,7 @@ export function ensureGatewayBootstrapped(): Promise<void> {
             } catch (error) {
                 console.error("[Bootstrap] Failed to start gateway:", error);
                 globalThis.__waGatewayBootPromise = undefined;
-                return;
+                throw error;
             }
         })();
     }

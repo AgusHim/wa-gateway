@@ -1,0 +1,137 @@
+openapi: 3.1.0
+info:
+  title: WA Gateway Public API
+  version: 1.0.0
+  description: Public customer API for WhatsApp Gateway workspace integrations.
+servers:
+  - url: https://your-domain.com/api/public/v1
+security:
+  - ApiKeyAuth: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-KEY
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+      required: [success]
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: false
+        message:
+          type: string
+      required: [success, message]
+paths:
+  /messages/send:
+    post:
+      summary: Queue outbound WhatsApp message
+      description: Requires scope `messages:send`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phoneNumber:
+                  type: string
+                text:
+                  type: string
+                channelId:
+                  type: string
+                mode:
+                  type: string
+                  enum: [chat, broadcast, notification]
+                templateId:
+                  type: string
+              required: [phoneNumber, text]
+      responses:
+        "202":
+          description: Accepted
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing/invalid API key
+        "403":
+          description: Scope/policy denied
+  /contacts/sync:
+    post:
+      summary: Sync contact records
+      description: Requires scope `contacts:write`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contacts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      phoneNumber:
+                        type: string
+                      name:
+                        type: string
+                      label:
+                        type: string
+                      segments:
+                        type: array
+                        items:
+                          type: string
+      responses:
+        "200":
+          description: Contacts synced
+        "400":
+          description: Invalid payload
+  /conversations:
+    get:
+      summary: Read conversations or user list
+      description: Requires scope `conversations:read`.
+      parameters:
+        - in: query
+          name: phoneNumber
+          schema:
+            type: string
+          required: false
+        - in: query
+          name: page
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Conversation payload
+        "404":
+          description: User not found (if phoneNumber provided)
+  /usage:
+    get:
+      summary: Read workspace usage snapshot
+      description: Requires scope `usage:read`.
+      responses:
+        "200":
+          description: Usage snapshot
+        "401":
+          description: Missing/invalid API key

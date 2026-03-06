@@ -1,36 +1,59 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-type MonitorMessage = {
-    phoneNumber: string;
-    messageText: string;
-    messageId: string;
-    pushName?: string;
-    timestamp: number;
-};
+import {
+    parseConnectionUpdatePayload,
+    parseMonitorMessagePayload,
+    type MonitorMessagePayload,
+    type WAConnectionStatus,
+} from "@/types/dashboard";
 
 export default function MonitorPage() {
-    const [messages, setMessages] = useState<MonitorMessage[]>([]);
+    const [messages, setMessages] = useState<MonitorMessagePayload[]>([]);
     const [phoneFilter, setPhoneFilter] = useState("");
     const [userFilter, setUserFilter] = useState("");
-    const [connectionState, setConnectionState] = useState<"connected" | "disconnected">("disconnected");
+    const [connectionState, setConnectionState] = useState<WAConnectionStatus | "disconnected">("disconnected");
 
     useEffect(() => {
         const source = new EventSource("/api/sse");
 
         source.addEventListener("connected", () => {
-            setConnectionState("connected");
+            setConnectionState((current) => (current === "disconnected" ? "connecting" : current));
         });
 
         source.addEventListener("new-message", (event) => {
-            const payload = JSON.parse(event.data) as MonitorMessage;
+            if (!(event instanceof MessageEvent)) return;
+
+            let rawPayload: unknown;
+            try {
+                rawPayload = JSON.parse(event.data);
+            } catch {
+                return;
+            }
+
+            const payload = parseMonitorMessagePayload(rawPayload);
+            if (!payload) {
+                return;
+            }
+
             setMessages((prev) => [payload, ...prev].slice(0, 200));
         });
 
         source.onerror = () => {
             setConnectionState("disconnected");
         };
+
+        source.addEventListener("connection-update", (event) => {
+            if (!(event instanceof MessageEvent)) return;
+            try {
+                const payload = parseConnectionUpdatePayload(JSON.parse(event.data));
+                if (payload) {
+                    setConnectionState(payload.status);
+                }
+            } catch {
+                setConnectionState("disconnected");
+            }
+        });
 
         return () => {
             source.close();
@@ -58,8 +81,10 @@ export default function MonitorPage() {
 
                 <span
                     className={`rounded-full px-3 py-1 text-xs font-medium ${
-                        connectionState === "connected"
+                        connectionState === "open"
                             ? "bg-emerald-100 text-emerald-700"
+                            : connectionState === "connecting"
+                                ? "bg-amber-100 text-amber-700"
                             : "bg-rose-100 text-rose-700"
                     }`}
                 >
@@ -96,6 +121,9 @@ export default function MonitorPage() {
                                 <span>{msg.pushName || "Unknown User"}</span>
                                 <span>{new Date(msg.timestamp * 1000).toLocaleString("id-ID")}</span>
                             </div>
+                            {msg.channelId ? (
+                                <p className="mt-1 text-[11px] text-slate-500">Channel: {msg.channelId}</p>
+                            ) : null}
                             <p className="mt-1 text-sm font-medium text-slate-700">{msg.phoneNumber}</p>
                             <p className="mt-3 text-sm text-slate-900">{msg.messageText}</p>
                         </article>

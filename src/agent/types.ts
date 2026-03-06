@@ -7,7 +7,9 @@ export type AgentToolCall = {
 };
 
 export interface AgentState {
+    workspaceId: string;
     userId: string;
+    channelId?: string;
     phoneNumber: string;
     incomingMessage: string;
     pushName?: string;
@@ -25,5 +27,9 @@ export interface AgentState {
 
     draftResponse: string;
     finalResponse: string;
+    responseModel: string;
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
     lastError: string;
 }

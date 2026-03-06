@@ -14,30 +14,25 @@ import {
     XAxis,
     YAxis,
 } from "recharts";
-
-type AnalyticsSummary = {
-    messageVolume: Array<{ date: string; count: number }>;
-    topTools: Array<{ toolName: string; count: number }>;
-    tokenUsage: Array<{ model: string; totalTokens: number; estimatedCostUsd: number }>;
-};
+import {
+    EMPTY_ANALYTICS_SUMMARY,
+    parseAnalyticsSummary,
+    type AnalyticsSummary,
+} from "@/types/dashboard";
 
 const COLORS = ["#0f766e", "#0369a1", "#4f46e5", "#ea580c", "#be123c", "#15803d"];
 
 export default function AnalyticsPage() {
-    const [data, setData] = useState<AnalyticsSummary>({
-        messageVolume: [],
-        topTools: [],
-        tokenUsage: [],
-    });
+    const [data, setData] = useState<AnalyticsSummary>(EMPTY_ANALYTICS_SUMMARY);
 
     useEffect(() => {
         const load = async () => {
             try {
                 const res = await fetch("/api/analytics/summary", { cache: "no-store" });
-                const payload = (await res.json()) as AnalyticsSummary;
-                setData(payload);
+                const payload = parseAnalyticsSummary(await res.json());
+                setData(payload ?? EMPTY_ANALYTICS_SUMMARY);
             } catch {
-                setData({ messageVolume: [], topTools: [], tokenUsage: [] });
+                setData(EMPTY_ANALYTICS_SUMMARY);
             }
         };
 

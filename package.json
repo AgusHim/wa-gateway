@@ -7,8 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate",
     "db:seed": "npx prisma db seed",
-    "test": "NODE_ENV=test node --test -r ./tests/setup.cjs ./tests/*.test.cjs"
+    "test": "NODE_ENV=test node --test -r ./tests/setup.cjs ./tests/*.test.cjs",
+    "ops:backup:postgres": "bash ./ops/backup-postgres.sh",
+    "ops:restore:postgres": "bash ./ops/restore-postgres.sh",
+    "ops:backup:redis": "bash ./ops/backup-redis.sh",
+    "ops:restore:redis": "bash ./ops/restore-redis.sh"
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"

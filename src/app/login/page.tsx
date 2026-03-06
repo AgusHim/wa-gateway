@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useState, Suspense } from "react";
-import { signIn } from "next-auth/react";
+import Link from "next/link";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { getProviders, signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function LoginForm() {
@@ -12,8 +13,18 @@ function LoginForm() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [hasGoogleProvider, setHasGoogleProvider] = useState(false);
 
     const callbackUrl = searchParams.get("callbackUrl") || "/";
+
+    useEffect(() => {
+        const loadProviders = async () => {
+            const providers = await getProviders();
+            setHasGoogleProvider(Boolean(providers?.google));
+        };
+
+        void loadProviders();
+    }, []);
 
     const onSubmit = async (event: FormEvent) => {
         event.preventDefault();
@@ -83,7 +94,32 @@ function LoginForm() {
                 >
                     {isLoading ? "Memproses..." : "Masuk"}
                 </button>
+
+                {hasGoogleProvider ? (
+                    <button
+                        type="button"
+                        onClick={() => void signIn("google", { callbackUrl })}
+                        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                        Masuk dengan Google
+                    </button>
+                ) : null}
             </form>
+
+            <div className="mt-4 space-y-1 text-sm text-slate-600">
+                <p>
+                    Belum punya tenant?{" "}
+                    <Link href="/signup" className="font-medium text-slate-900 underline">
+                        Buat Organization
+                    </Link>
+                </p>
+                <p>
+                    Lupa password?{" "}
+                    <Link href="/forgot-password" className="font-medium text-slate-900 underline">
+                        Reset password
+                    </Link>
+                </p>
+            </div>
         </div>
     );
 }

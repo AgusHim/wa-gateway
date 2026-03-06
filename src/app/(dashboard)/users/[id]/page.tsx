@@ -2,21 +2,23 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { messageRepo } from "@/lib/db/messageRepo";
 import { userRepo } from "@/lib/db/userRepo";
+import type { ChatUserDetail } from "@/lib/db/userRepo";
 import { upsertUserMemoryAction } from "../../actions";
+import type { PageWithParams } from "@/types/dashboard";
+import { requireSessionPermission } from "@/lib/auth/sessionContext";
 
 export default async function UserDetailPage({
     params,
-}: {
-    params: Promise<{ id: string }>;
-}) {
+}: PageWithParams<{ id: string }>) {
+    const { workspaceId } = await requireSessionPermission("read");
     const { id } = await params;
 
-    const user = await userRepo.getUserById(id);
+    const user: ChatUserDetail | null = await userRepo.getUserById(id, workspaceId);
     if (!user) {
         notFound();
     }
 
-    const recentMessages = await messageRepo.getRecentHistory(id, 20);
+    const recentMessages = await messageRepo.getRecentHistory(workspaceId, id, 20);
 
     return (
         <section className="space-y-5">

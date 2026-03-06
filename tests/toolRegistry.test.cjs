@@ -35,7 +35,7 @@ test("tool registry registers and executes a tool", async () => {
   const result = await executeTool(
     "sum_two",
     { a: "4", b: "6" },
-    { userId: "u1", phoneNumber: "628111" }
+    { workspaceId: "default-workspace", userId: "u1", phoneNumber: "628111" }
   );
 
   assert.equal(result, "10");

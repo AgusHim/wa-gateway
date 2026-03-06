@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-type WAStatus = "open" | "close" | "connecting";
+import { parseWaStatusResponse, type WAConnectionStatus } from "@/types/dashboard";
 
 export function WaStatusCard() {
-    const [status, setStatus] = useState<WAStatus>("close");
+    const [status, setStatus] = useState<WAConnectionStatus>("close");
 
     useEffect(() => {
         let active = true;
@@ -13,8 +12,8 @@ export function WaStatusCard() {
         const load = async () => {
             try {
                 const res = await fetch("/api/wa/status", { cache: "no-store" });
-                const data = (await res.json()) as { status?: WAStatus };
-                if (active && data.status) {
+                const data = parseWaStatusResponse(await res.json());
+                if (active && data) {
                     setStatus(data.status);
                 }
             } catch {

@@ -5,27 +5,45 @@ import makeWASocket, {
     WASocket,
     fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
+import { ChannelHealthStatus, UsageMetric } from "@prisma/client";
 import { Boom } from "@hapi/boom";
 import pino from "pino";
 import path from "path";
 import fs from "fs";
-import { clearLatestQr, emitConnectionUpdate, emitNewMessage, emitQr } from "./events";
-import { messageQueue } from "../queue/messageQueue";
+import { channelRepo } from "@/lib/db/channelRepo";
+import { billingService } from "@/lib/billing/service";
+import {
+    clearLatestQr,
+    emitConnectionUpdate,
+    emitNewMessage,
+    emitQr,
+    WAConnectionStatus,
+    WAHealthStatus,
+} from "./events";
+import { getInboundMessageQueue } from "../queue/messageQueue";
 import { sessionRepo } from "../db/sessionRepo";
+import { getDefaultTenantContext } from "../tenant/context";
+import { withObservationContext } from "@/lib/observability/context";
+import { logError, logInfo } from "@/lib/observability/logger";
+import { generateCorrelationId, generateTraceId } from "@/lib/observability/trace";
 
 const logger = pino({ level: "silent" });
-
-let sock: WASocket | null = null;
-let connectionStatus: "open" | "close" | "connecting" = "close";
-let retryCount = 0;
 const MAX_RETRIES = 5;
-let manualDisconnectInProgress = false;
-const recentlySentMessageIds = new Set<string>();
+const QR_TTL_MS = 60_000;
+const AUTH_ROOT_DIR = path.join(process.cwd(), ".wa-auth", "channels");
 
-const AUTH_DIR = path.join(process.cwd(), ".wa-auth");
-const SESSION_ID = process.env.WA_SESSION_ID || "main-session";
-const QR_SESSION_ID = `${SESSION_ID}:latest-qr`;
-const STATUS_SESSION_ID = `${SESSION_ID}:connection-status`;
+type ChannelRuntimeState = {
+    channelId: string;
+    workspaceId: string;
+    sock: WASocket | null;
+    status: WAConnectionStatus;
+    retryCount: number;
+    manualDisconnectInProgress: boolean;
+    recentlySentMessageIds: Set<string>;
+    connectLock?: Promise<void>;
+};
+
+const channelRuntime = new Map<string, ChannelRuntimeState>();
 
 function ensureDir(pathName: string) {
     if (!fs.existsSync(pathName)) {
@@ -51,7 +69,6 @@ function toPhoneIdentifier(remoteJid: string): string {
         return remoteJid.replace("@s.whatsapp.net", "");
     }
     if (remoteJid.includes("@")) {
-        // Keep non-phone JIDs (e.g. @lid) as-is so routing stays valid.
         return normalizeJid(remoteJid);
     }
     return remoteJid;
@@ -66,30 +83,113 @@ function getMessageText(msg: {
     return msg.message?.conversation || msg.message?.extendedTextMessage?.text || "";
 }
 
-async function handleManualOperatorMessage(remoteJid: string, messageText: string): Promise<void> {
-    const phoneNumber = toPhoneIdentifier(remoteJid);
-    if (!phoneNumber) return;
-
-    const [{ userRepo }, { messageRepo }, { handoverRepo }] = await Promise.all([
-        import("../db/userRepo"),
-        import("../db/messageRepo"),
-        import("../handover/repo"),
-    ]);
-
-    const user = await userRepo.upsertUser(phoneNumber);
-
-    if (messageText.trim()) {
-        await messageRepo.saveMessage({
-            userId: user.id,
-            role: "assistant",
-            content: messageText,
-            metadata: {
-                source: "human-operator",
-            },
-        });
+function hasMediaPayload(msg: {
+    message?: Record<string, unknown> | null;
+}): boolean {
+    const message = msg.message;
+    if (!message || typeof message !== "object") {
+        return false;
     }
 
-    await handoverRepo.clearPending(phoneNumber);
+    return Boolean(
+        message.imageMessage
+        || message.videoMessage
+        || message.audioMessage
+        || message.documentMessage
+        || message.stickerMessage
+    );
+}
+
+function getAuthDir(channelId: string) {
+    return path.join(AUTH_ROOT_DIR, channelId);
+}
+
+function authStateSessionKey(channelId: string) {
+    return `wa:${channelId}:auth-state`;
+}
+
+function qrSessionKey(channelId: string) {
+    return `wa:${channelId}:latest-qr`;
+}
+
+function qrExpirySessionKey(channelId: string) {
+    return `wa:${channelId}:latest-qr-expiry`;
+}
+
+function statusSessionKey(channelId: string) {
+    return `wa:${channelId}:connection-status`;
+}
+
+function mapHealthStatus(status: WAConnectionStatus, reasonCode?: number | null): WAHealthStatus {
+    if (status === "open") {
+        return "connected";
+    }
+    if (status === "connecting") {
+        return "degraded";
+    }
+    if (reasonCode === DisconnectReason.restartRequired) {
+        return "degraded";
+    }
+    if (reasonCode === 401 || reasonCode === 403) {
+        return "banned-risk";
+    }
+    return "disconnected";
+}
+
+function toDbHealthStatus(status: WAHealthStatus): ChannelHealthStatus {
+    if (status === "connected") return ChannelHealthStatus.CONNECTED;
+    if (status === "degraded") return ChannelHealthStatus.DEGRADED;
+    if (status === "banned-risk") return ChannelHealthStatus.BANNED_RISK;
+    return ChannelHealthStatus.DISCONNECTED;
+}
+
+function healthScore(status: WAHealthStatus): number {
+    if (status === "connected") return 100;
+    if (status === "degraded") return 60;
+    if (status === "banned-risk") return 20;
+    return 30;
+}
+
+function getOrCreateRuntime(channelId: string, workspaceId: string): ChannelRuntimeState {
+    const existing = channelRuntime.get(channelId);
+    if (existing) {
+        existing.workspaceId = workspaceId;
+        return existing;
+    }
+
+    const runtime: ChannelRuntimeState = {
+        channelId,
+        workspaceId,
+        sock: null,
+        status: "close",
+        retryCount: 0,
+        manualDisconnectInProgress: false,
+        recentlySentMessageIds: new Set<string>(),
+    };
+
+    channelRuntime.set(channelId, runtime);
+    return runtime;
+}
+
+function trackSentMessage(runtime: ChannelRuntimeState, messageId?: string | null) {
+    if (!messageId) return;
+    runtime.recentlySentMessageIds.add(messageId);
+    setTimeout(() => {
+        runtime.recentlySentMessageIds.delete(messageId);
+    }, 120_000);
+}
+
+async function restoreAuthFromDb(channelId: string): Promise<void> {
+    const session = await sessionRepo.getSession(authStateSessionKey(channelId));
+    if (!session?.data) return;
+
+    const authDir = getAuthDir(channelId);
+    ensureDir(authDir);
+
+    const files = JSON.parse(session.data) as Record<string, string>;
+    for (const [fileName, content] of Object.entries(files)) {
+        fs.writeFileSync(path.join(authDir, fileName), content, "utf-8");
+    }
 }
 
 function listAuthFiles(dirPath: string): string[] {
@@ -100,66 +200,354 @@ function listAuthFiles(dirPath: string): string[] {
     });
 }
 
-async function restoreAuthFromDb(): Promise<void> {
-    const session = await sessionRepo.getSession(SESSION_ID);
-    if (!session?.data) return;
-
-    ensureDir(AUTH_DIR);
-    const files = JSON.parse(session.data) as Record<string, string>;
-
-    for (const [fileName, content] of Object.entries(files)) {
-        fs.writeFileSync(path.join(AUTH_DIR, fileName), content, "utf-8");
-    }
-}
-
-async function backupAuthToDb(): Promise<void> {
-    ensureDir(AUTH_DIR);
-    const files = listAuthFiles(AUTH_DIR);
+async function backupAuthToDb(channelId: string): Promise<void> {
+    const authDir = getAuthDir(channelId);
+    ensureDir(authDir);
+    const files = listAuthFiles(authDir);
     const payload: Record<string, string> = {};
 
     for (const fileName of files) {
-        payload[fileName] = fs.readFileSync(path.join(AUTH_DIR, fileName), "utf-8");
+        payload[fileName] = fs.readFileSync(path.join(authDir, fileName), "utf-8");
     }
 
-    await sessionRepo.saveSession(SESSION_ID, JSON.stringify(payload));
+    await sessionRepo.saveSession(authStateSessionKey(channelId), JSON.stringify(payload));
 }
 
-async function persistConnectionStatus(status: "open" | "close" | "connecting") {
-    await sessionRepo.saveSession(STATUS_SESSION_ID, status);
-}
-
-function trackSentMessage(messageId?: string | null) {
-    if (!messageId) return;
-    recentlySentMessageIds.add(messageId);
-    setTimeout(() => {
-        recentlySentMessageIds.delete(messageId);
-    }, 120000);
-}
-
-async function clearAuthState(): Promise<void> {
-    if (fs.existsSync(AUTH_DIR)) {
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+async function clearAuthState(channelId: string): Promise<void> {
+    const authDir = getAuthDir(channelId);
+    if (fs.existsSync(authDir)) {
+        fs.rmSync(authDir, { recursive: true, force: true });
     }
-    await sessionRepo.deleteSession(SESSION_ID);
-    await sessionRepo.deleteSession(QR_SESSION_ID);
-    await sessionRepo.saveSession(STATUS_SESSION_ID, "close");
-    clearLatestQr();
+
+    await Promise.all([
+        sessionRepo.deleteSession(authStateSessionKey(channelId)),
+        sessionRepo.deleteSession(qrSessionKey(channelId)),
+        sessionRepo.deleteSession(qrExpirySessionKey(channelId)),
+        sessionRepo.saveSession(statusSessionKey(channelId), "close"),
+    ]);
+
+    clearLatestQr(channelId);
 }
 
-export function getConnectionStatus() {
-    return connectionStatus;
+async function persistConnectionStatus(channelId: string, status: WAConnectionStatus) {
+    await sessionRepo.saveSession(statusSessionKey(channelId), status);
 }
 
-export function getSocket(): WASocket | null {
-    return sock;
+function getOwnJid(sock: WASocket | null): string | null {
+    const raw = sock?.user?.id;
+    if (!raw) return null;
+
+    const [left, server] = raw.split("@");
+    if (!left || !server) return null;
+
+    const user = left.split(":")[0];
+    return `${user}@${server}`;
 }
 
-export async function connectToWhatsApp(): Promise<void> {
-    await restoreAuthFromDb();
-    const { state, saveCreds } = await loadMultiFileAuthState(AUTH_DIR);
+async function handleManualOperatorMessage(runtime: ChannelRuntimeState, remoteJid: string, messageText: string): Promise<void> {
+    const phoneNumber = toPhoneIdentifier(remoteJid);
+    if (!phoneNumber) return;
+
+    const [{ userRepo }, { messageRepo }, { handoverRepo }] = await Promise.all([
+        import("../db/userRepo"),
+        import("../db/messageRepo"),
+        import("../handover/repo"),
+    ]);
+
+    const user = await userRepo.upsertUser(phoneNumber, runtime.workspaceId, undefined);
+
+    if (messageText.trim()) {
+        await messageRepo.saveMessage({
+            workspaceId: runtime.workspaceId,
+            userId: user.id,
+            role: "assistant",
+            content: messageText,
+            metadata: {
+                source: "human-operator",
+                channelId: runtime.channelId,
+            },
+        });
+    }
+
+    await handoverRepo.clearPending(phoneNumber, runtime.workspaceId);
+}
+
+function attachSocketEventHandlers(
+    runtime: ChannelRuntimeState,
+    sock: WASocket,
+    saveCreds: () => Promise<void>
+) {
+    sock.ev.on("connection.update", async (update) => {
+        const { connection, lastDisconnect, qr } = update;
+
+        if (qr) {
+            const expiresAt = Date.now() + QR_TTL_MS;
+            await Promise.all([
+                sessionRepo.saveSession(qrSessionKey(runtime.channelId), qr),
+                sessionRepo.saveSession(qrExpirySessionKey(runtime.channelId), String(expiresAt)),
+                channelRepo.createAudit(runtime.channelId, {
+                    eventType: "qr_generated",
+                    status: "info",
+                    metadata: { expiresAt },
+                }),
+            ]);
+
+            emitQr({
+                workspaceId: runtime.workspaceId,
+                channelId: runtime.channelId,
+                qr,
+                expiresAt,
+            });
+        }
+
+        if (connection === "connecting") {
+            runtime.status = "connecting";
+            await persistConnectionStatus(runtime.channelId, "connecting");
+
+            const health = mapHealthStatus("connecting", null);
+            emitConnectionUpdate({
+                workspaceId: runtime.workspaceId,
+                channelId: runtime.channelId,
+                status: "connecting",
+                healthStatus: health,
+            });
+
+            await channelRepo.updateHealth(runtime.channelId, {
+                healthStatus: toDbHealthStatus(health),
+                healthScore: healthScore(health),
+                status: "connecting",
+            });
+            return;
+        }
+
+        if (connection === "open") {
+            runtime.status = "open";
+            runtime.retryCount = 0;
+
+            await Promise.all([
+                persistConnectionStatus(runtime.channelId, "open"),
+                sessionRepo.deleteSession(qrSessionKey(runtime.channelId)),
+                sessionRepo.deleteSession(qrExpirySessionKey(runtime.channelId)),
+            ]);
+
+            clearLatestQr(runtime.channelId);
+
+            const health = mapHealthStatus("open", null);
+            emitConnectionUpdate({
+                workspaceId: runtime.workspaceId,
+                channelId: runtime.channelId,
+                status: "open",
+                healthStatus: health,
+            });
+
+            await channelRepo.updateHealth(runtime.channelId, {
+                healthStatus: toDbHealthStatus(health),
+                healthScore: healthScore(health),
+                status: "active",
+                markSeen: true,
+            });
+
+            await channelRepo.createAudit(runtime.channelId, {
+                eventType: "connected",
+                status: "success",
+                message: "Channel connected",
+            });
+
+            return;
+        }
+
+        if (connection === "close") {
+            runtime.status = "close";
+            runtime.sock = null;
+            await persistConnectionStatus(runtime.channelId, "close");
+
+            const reasonCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+            const restartRequired = reasonCode === DisconnectReason.restartRequired;
+            const manual = runtime.manualDisconnectInProgress;
+            runtime.manualDisconnectInProgress = false;
+            const health = mapHealthStatus("close", reasonCode);
+
+            emitConnectionUpdate({
+                workspaceId: runtime.workspaceId,
+                channelId: runtime.channelId,
+                status: "close",
+                healthStatus: health,
+                message: manual
+                    ? "manual_disconnect"
+                    : restartRequired
+                        ? "restart_required"
+                        : reasonCode ? `reason:${reasonCode}` : undefined,
+            });
+
+            await channelRepo.updateHealth(runtime.channelId, {
+                healthStatus: toDbHealthStatus(health),
+                healthScore: healthScore(health),
+                status: manual ? "inactive" : (restartRequired ? "connecting" : "active"),
+                message: restartRequired ? undefined : (reasonCode ? `reason:${reasonCode}` : undefined),
+            });
+
+            await channelRepo.createAudit(runtime.channelId, {
+                eventType: manual
+                    ? "manual_disconnect"
+                    : restartRequired
+                        ? "restart_required"
+                        : "connection_closed",
+                status: manual
+                    ? "success"
+                    : restartRequired
+                        ? "info"
+                        : health,
+                message: restartRequired ? "reason:restart_required" : (reasonCode ? `reason:${reasonCode}` : undefined),
+            });
+
+            if (manual) {
+                return;
+            }
+
+            if (reasonCode === DisconnectReason.loggedOut) {
+                await clearAuthState(runtime.channelId);
+            }
+
+            if (restartRequired) {
+                setTimeout(() => {
+                    void connectToWhatsApp(runtime.channelId);
+                }, 200);
+                return;
+            }
+
+            if (runtime.retryCount < MAX_RETRIES) {
+                runtime.retryCount += 1;
+                const delay = Math.min(1000 * Math.pow(2, runtime.retryCount), 30_000);
+                setTimeout(() => {
+                    void connectToWhatsApp(runtime.channelId);
+                }, delay);
+            }
+        }
+    });
+
+    sock.ev.on("creds.update", async () => {
+        await saveCreds();
+        await backupAuthToDb(runtime.channelId);
+    });
+
+    sock.ev.on("messages.upsert", async ({ messages, type }) => {
+        if (type !== "notify") return;
+
+        for (const msg of messages) {
+            const remoteJid = msg.key.remoteJid ?? "";
+            const messageText = getMessageText(msg);
+            const mediaDetected = hasMediaPayload(msg as { message?: Record<string, unknown> | null });
+
+            if (msg.key.fromMe) {
+                const ownJid = getOwnJid(runtime.sock);
+                const isSelfChat = Boolean(ownJid) && remoteJid === ownJid;
+                const sentByGateway = Boolean(msg.key.id) && runtime.recentlySentMessageIds.has(msg.key.id as string);
+
+                if (sentByGateway) {
+                    continue;
+                }
+
+                if (!isSelfChat) {
+                    try {
+                        await handleManualOperatorMessage(runtime, remoteJid, messageText);
+                    } catch (error) {
+                        logError("wa.manual_operator_message.process_failed", error, {
+                            workspaceId: runtime.workspaceId,
+                            channelId: runtime.channelId,
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            if (remoteJid.endsWith("@g.us")) continue;
+            if (remoteJid === "status@broadcast") continue;
+
+            const phoneNumber = toPhoneIdentifier(remoteJid);
+
+            if (mediaDetected && phoneNumber) {
+                await billingService.recordUsageEvent({
+                    workspaceId: runtime.workspaceId,
+                    channelId: runtime.channelId,
+                    metric: UsageMetric.MEDIA_IN,
+                    quantity: 1,
+                    referenceId: phoneNumber,
+                    metadata: {
+                        source: "wa-media-in",
+                    },
+                });
+            }
+
+            if (!messageText || !phoneNumber) continue;
+
+            const messageId = msg.key.id ?? "";
+            const correlationId = generateCorrelationId();
+            const traceId = generateTraceId();
+            const pushName = msg.pushName ?? undefined;
+            const timestamp = typeof msg.messageTimestamp === "number"
+                ? msg.messageTimestamp
+                : Date.now() / 1000;
+
+            await withObservationContext({
+                correlationId,
+                traceId,
+                workspaceId: runtime.workspaceId,
+                channelId: runtime.channelId,
+                messageId,
+                component: "baileys",
+            }, async () => {
+                emitNewMessage({
+                    workspaceId: runtime.workspaceId,
+                    channelId: runtime.channelId,
+                    phoneNumber,
+                    messageText,
+                    messageId,
+                    pushName,
+                    timestamp,
+                });
+
+                const inboundQueue = getInboundMessageQueue(runtime.workspaceId, runtime.channelId);
+                await inboundQueue.add(`inbound:${runtime.channelId}`, {
+                    workspaceId: runtime.workspaceId,
+                    channelId: runtime.channelId,
+                    phoneNumber,
+                    messageText,
+                    messageId,
+                    timestamp,
+                    pushName,
+                    enqueuedAt: Date.now(),
+                    correlationId,
+                    traceId,
+                });
+
+                logInfo("pipeline.wa.inbound_enqueued", {
+                    queueName: inboundQueue.name,
+                    phoneNumber,
+                });
+            });
+        }
+    });
+}
+
+async function connectSingleChannel(channelId: string): Promise<void> {
+    const channel = await channelRepo.getChannelById(channelId);
+    if (!channel || !channel.isEnabled || channel.status === "removed" || !channel.workspace?.isActive) {
+        return;
+    }
+
+    const runtime = getOrCreateRuntime(channel.id, channel.workspaceId);
+    if (runtime.sock && runtime.status !== "close") {
+        return;
+    }
+
+    const authDir = getAuthDir(channel.id);
+    ensureDir(authDir);
+    await restoreAuthFromDb(channel.id);
+
+    const { state, saveCreds } = await loadMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
-    sock = makeWASocket({
+    const sock = makeWASocket({
         version,
         auth: {
             creds: state.creds,
@@ -169,164 +557,141 @@ export async function connectToWhatsApp(): Promise<void> {
         generateHighQualityLinkPreview: false,
     });
 
-    // Connection update handler
-    sock.ev.on("connection.update", async (update) => {
-        const { connection, lastDisconnect, qr } = update;
+    runtime.sock = sock;
+    runtime.status = "connecting";
 
-        if (qr) {
-            console.log("[WA] QR Code generated");
-            await sessionRepo.saveSession(QR_SESSION_ID, qr);
-            emitQr(qr);
-        }
+    attachSocketEventHandlers(runtime, sock, saveCreds);
 
-        if (connection === "close") {
-            connectionStatus = "close";
-            await persistConnectionStatus("close");
-            const reason = (lastDisconnect?.error as Boom)?.output?.statusCode;
-            const manual = manualDisconnectInProgress;
-            manualDisconnectInProgress = false;
-            emitConnectionUpdate({
-                status: "close",
-                message: manual
-                    ? "manual_disconnect"
-                    : reason ? `reason:${reason}` : undefined,
-            });
-
-            if (manual) {
-                console.log("[WA] Connection closed by manual disconnect.");
-                return;
-            }
-
-            if (reason === DisconnectReason.loggedOut) {
-                console.log("[WA] Session logged out. Clearing auth state and requesting new QR.");
-                await clearAuthState();
-            }
-
-            if (retryCount < MAX_RETRIES) {
-                retryCount++;
-                const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
-                console.log(`[WA] Reconnecting in ${delay / 1000}s (attempt ${retryCount}/${MAX_RETRIES})...`);
-                setTimeout(connectToWhatsApp, delay);
-            } else {
-                console.error("[WA] Max retries reached. Cooling down for 30s before retrying...");
-                retryCount = 0;
-                setTimeout(connectToWhatsApp, 30000);
-            }
-        }
-
-        if (connection === "open") {
-            connectionStatus = "open";
-            await persistConnectionStatus("open");
-            retryCount = 0;
-            clearLatestQr();
-            await sessionRepo.deleteSession(QR_SESSION_ID);
-            console.log("[WA] Connected successfully!");
-            emitConnectionUpdate({ status: "open" });
-        }
-
-        if (connection === "connecting") {
-            connectionStatus = "connecting";
-            await persistConnectionStatus("connecting");
-            emitConnectionUpdate({ status: "connecting" });
-        }
+    emitConnectionUpdate({
+        workspaceId: runtime.workspaceId,
+        channelId: runtime.channelId,
+        status: "connecting",
+        healthStatus: "degraded",
+        message: "initial_connect",
     });
+}
 
-    // Save credentials on update
-    sock.ev.on("creds.update", async () => {
-        await saveCreds();
-        await backupAuthToDb();
-    });
+export async function connectToWhatsApp(channelId?: string): Promise<void> {
+    if (channelId) {
+        const runtime = channelRuntime.get(channelId);
+        if (runtime?.connectLock) {
+            return runtime.connectLock;
+        }
 
-    // Message handler
-    sock.ev.on("messages.upsert", async ({ messages, type }) => {
-        if (type !== "notify") return;
-
-        for (const msg of messages) {
-            const remoteJid = msg.key.remoteJid ?? "";
-            const messageText = getMessageText(msg);
-
-            // Allow self-chat testing:
-            // - process messages from connected number only in self-chat
-            // - ignore messages that were sent by this gateway to avoid loops
-            if (msg.key.fromMe) {
-                const ownJid = getOwnJid();
-                const isSelfChat = Boolean(ownJid) && remoteJid === ownJid;
-                const sentByGateway = Boolean(msg.key.id) && recentlySentMessageIds.has(msg.key.id as string);
-
-                if (sentByGateway) {
-                    continue;
+        const lock = (async () => {
+            try {
+                await connectSingleChannel(channelId);
+            } catch (error) {
+                logError("wa.connect.failed", error, {
+                    channelId,
+                });
+                const runtimeState = channelRuntime.get(channelId);
+                if (runtimeState) {
+                    runtimeState.status = "close";
                 }
-
-                if (!isSelfChat) {
-                    try {
-                        await handleManualOperatorMessage(remoteJid, messageText);
-                    } catch (error) {
-                        console.error("[WA] Failed to process manual operator message:", error);
-                    }
-                    continue;
+            } finally {
+                const runtimeState = channelRuntime.get(channelId);
+                if (runtimeState) {
+                    runtimeState.connectLock = undefined;
                 }
             }
+        })();
 
-            // Ignore group messages (optional — uncomment to allow groups)
-            if (remoteJid.endsWith("@g.us")) continue;
+        const state = channelRuntime.get(channelId) || getOrCreateRuntime(channelId, getDefaultTenantContext().workspaceId);
+        state.connectLock = lock;
+        return lock;
+    }
 
-            // Ignore status broadcasts
-            if (remoteJid === "status@broadcast") continue;
+    const channels = await channelRepo.listActiveRuntimeChannels();
+    if (channels.length === 0) {
+        const tenant = getDefaultTenantContext();
+        await connectToWhatsApp(tenant.channelId);
+        return;
+    }
 
-            const phoneNumber = toPhoneIdentifier(remoteJid);
+    await Promise.all(channels.map((channel) => connectToWhatsApp(channel.id)));
+}
 
-            if (!messageText || !phoneNumber) continue;
+async function resolveChannelIdForSend(input?: { channelId?: string; workspaceId?: string }): Promise<string> {
+    if (input?.channelId) {
+        return input.channelId;
+    }
 
-            const messageId = msg.key.id ?? "";
-            const pushName = msg.pushName ?? undefined;
-            const timestamp = typeof msg.messageTimestamp === "number"
-                ? msg.messageTimestamp
-                : Date.now() / 1000;
-
-            console.log(`[WA] Message from ${phoneNumber}: ${messageText.substring(0, 50)}...`);
-
-            // Emit event for live monitor
-            emitNewMessage({
-                phoneNumber,
-                messageText,
-                messageId,
-                pushName,
-                timestamp,
-            });
-
-            // Enqueue to BullMQ
-            await messageQueue.add("inbound", {
-                phoneNumber,
-                messageText,
-                messageId,
-                timestamp,
-                pushName,
-            });
+    if (input?.workspaceId) {
+        const primary = await channelRepo.getPrimaryWorkspaceChannel(input.workspaceId);
+        if (primary) {
+            return primary.id;
         }
-    });
+    }
+
+    const fallback = getDefaultTenantContext().channelId;
+    return fallback;
+}
+
+function getSocketByChannelId(channelId: string): WASocket | null {
+    return channelRuntime.get(channelId)?.sock ?? null;
+}
+
+export function getSocket(channelId?: string): WASocket | null {
+    if (channelId) {
+        return getSocketByChannelId(channelId);
+    }
+
+    const tenant = getDefaultTenantContext();
+    return getSocketByChannelId(tenant.channelId);
+}
+
+export function getConnectionStatus(channelId?: string): WAConnectionStatus {
+    if (channelId) {
+        return channelRuntime.get(channelId)?.status ?? "close";
+    }
+
+    const tenant = getDefaultTenantContext();
+    return channelRuntime.get(tenant.channelId)?.status ?? "close";
 }
 
 export async function sendMessage(
     phoneNumber: string,
     text: string,
-    options?: { withTyping?: boolean }
+    options?: { withTyping?: boolean; channelId?: string; workspaceId?: string }
 ): Promise<void> {
-    if (!sock) {
-        throw new Error("[WA] Socket not connected");
+    const resolvedChannelId = await resolveChannelIdForSend({
+        channelId: options?.channelId,
+        workspaceId: options?.workspaceId,
+    });
+
+    await connectToWhatsApp(resolvedChannelId);
+    const runtime = channelRuntime.get(resolvedChannelId);
+    const sock = runtime?.sock;
+
+    if (!runtime || !sock) {
+        throw new Error(`[WA] Channel socket not connected (${resolvedChannelId})`);
     }
 
     const jid = toRecipientJid(phoneNumber);
 
     if (options?.withTyping ?? true) {
-        await sendTyping(phoneNumber, text.length);
+        await sendTyping(phoneNumber, text.length, { channelId: resolvedChannelId });
     }
+
     const sent = await sock.sendMessage(jid, { text });
-    trackSentMessage(sent?.key?.id);
+    trackSentMessage(runtime, sent?.key?.id);
 }
 
-export async function sendTyping(phoneNumber: string, textLength: number = 30): Promise<void> {
+export async function sendTyping(
+    phoneNumber: string,
+    textLength: number = 30,
+    options?: { channelId?: string; workspaceId?: string }
+): Promise<void> {
+    const resolvedChannelId = await resolveChannelIdForSend({
+        channelId: options?.channelId,
+        workspaceId: options?.workspaceId,
+    });
+
+    await connectToWhatsApp(resolvedChannelId);
+    const sock = channelRuntime.get(resolvedChannelId)?.sock;
     if (!sock) {
-        throw new Error("[WA] Socket not connected");
+        throw new Error(`[WA] Channel socket not connected (${resolvedChannelId})`);
     }
 
     const jid = toRecipientJid(phoneNumber);
@@ -338,43 +703,124 @@ export async function sendTyping(phoneNumber: string, textLength: number = 30): 
     await sock.sendPresenceUpdate("paused", jid);
 }
 
-function getOwnJid(): string | null {
-    const raw = sock?.user?.id;
-    if (!raw) return null;
+export async function sendOperatorReport(
+    text: string,
+    options?: { channelId?: string; workspaceId?: string }
+): Promise<void> {
+    const resolvedChannelId = await resolveChannelIdForSend(options);
+    await connectToWhatsApp(resolvedChannelId);
+    const runtime = channelRuntime.get(resolvedChannelId);
+    const sock = runtime?.sock;
 
-    // Baileys user id can include device suffix (e.g. 628xx:12@s.whatsapp.net)
-    const [left, server] = raw.split("@");
-    if (!left || !server) return null;
-
-    const user = left.split(":")[0];
-    return `${user}@${server}`;
-}
-
-export async function sendOperatorReport(text: string): Promise<void> {
-    if (!sock) {
-        console.error("[WA] Cannot send operator report: socket not connected");
+    if (!runtime || !sock) {
+        console.error(`[WA] Cannot send operator report: socket not connected (${resolvedChannelId})`);
         return;
     }
 
-    const ownJid = getOwnJid();
+    const ownJid = getOwnJid(sock);
     if (!ownJid) {
         console.error("[WA] Cannot send operator report: own JID not available");
         return;
     }
 
     const sent = await sock.sendMessage(ownJid, { text });
-    trackSentMessage(sent?.key?.id);
+    trackSentMessage(runtime, sent?.key?.id);
 }
 
-export async function disconnectWhatsApp(): Promise<void> {
-    if (sock) {
-        manualDisconnectInProgress = true;
-        await sock.logout();
-        sock = null;
-    }
-    connectionStatus = "close";
-    await persistConnectionStatus("close");
-    emitConnectionUpdate({ status: "close", message: "manual_disconnect" });
-    await clearAuthState();
-    console.log("[WA] Disconnected and auth state cleared");
+export async function disconnectWhatsApp(
+    channelId?: string,
+    options?: { clearSession?: boolean }
+): Promise<void> {
+    const clearSession = options?.clearSession ?? false;
+
+    const channelIds = channelId
+        ? [channelId]
+        : Array.from(channelRuntime.keys());
+
+    await Promise.all(channelIds.map(async (id) => {
+        const runtime = channelRuntime.get(id);
+        if (!runtime) {
+            if (clearSession) {
+                await clearAuthState(id);
+            }
+            return;
+        }
+
+        if (runtime.sock) {
+            runtime.manualDisconnectInProgress = true;
+            try {
+                await runtime.sock.logout();
+            } catch {
+                // noop
+            }
+            runtime.sock = null;
+        }
+
+        runtime.status = "close";
+        await persistConnectionStatus(id, "close");
+
+        emitConnectionUpdate({
+            workspaceId: runtime.workspaceId,
+            channelId: runtime.channelId,
+            status: "close",
+            healthStatus: "disconnected",
+            message: clearSession ? "manual_disconnect_clear_session" : "manual_disconnect",
+        });
+
+        await channelRepo.updateHealth(id, {
+            healthStatus: ChannelHealthStatus.DISCONNECTED,
+            healthScore: 30,
+            status: clearSession ? "inactive" : "active",
+            message: clearSession ? "session_cleared" : "manual_disconnect",
+        });
+
+        await channelRepo.createAudit(id, {
+            eventType: clearSession ? "manual_disconnect_clear_session" : "manual_disconnect",
+            status: "success",
+        });
+
+        if (clearSession) {
+            await clearAuthState(id);
+        }
+    }));
+}
+
+export async function getWorkspaceChannelRuntimeStatus(workspaceId: string) {
+    const channels = await channelRepo.listWorkspaceChannels(workspaceId);
+
+    const statusSessions = await Promise.all(channels.map((channel) => sessionRepo.getSession(statusSessionKey(channel.id))));
+    const qrSessions = await Promise.all(channels.map((channel) => sessionRepo.getSession(qrSessionKey(channel.id))));
+    const qrExpirySessions = await Promise.all(channels.map((channel) => sessionRepo.getSession(qrExpirySessionKey(channel.id))));
+
+    return channels.map((channel, index) => {
+        const runtimeStatus = channelRuntime.get(channel.id)?.status;
+        const persistedStatus = statusSessions[index]?.data;
+        const status: WAConnectionStatus = runtimeStatus
+            || (persistedStatus === "open" || persistedStatus === "close" || persistedStatus === "connecting"
+                ? persistedStatus
+                : "close");
+        const qr = qrSessions[index]?.data || null;
+        const qrExpiryRaw = qrExpirySessions[index]?.data;
+        const qrExpiresAt = qrExpiryRaw ? Number(qrExpiryRaw) : null;
+
+        return {
+            channelId: channel.id,
+            workspaceId,
+            name: channel.name,
+            provider: channel.provider,
+            identifier: channel.identifier,
+            status,
+            isEnabled: channel.isEnabled,
+            isPrimary: channel.isPrimary,
+            healthStatus: channel.healthStatus,
+            healthScore: channel.healthScore,
+            rateLimitPerSecond: channel.rateLimitPerSecond,
+            lastSeenAt: channel.lastSeenAt,
+            lastError: channel.lastError,
+            qr,
+            qrExpiresAt,
+            hasAuthState: Boolean(qrSessions[index]?.data || statusSessions[index]?.data),
+            policy: channel.policy,
+        };
+    });
 }

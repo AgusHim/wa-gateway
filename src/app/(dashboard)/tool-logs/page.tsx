@@ -1,15 +1,11 @@
 import { toolLogRepo } from "@/lib/db/toolLogRepo";
-
-type SearchParams = {
-    toolName?: string;
-    status?: "success" | "failed";
-};
+import type { PageWithSearchParams, ToolLogsSearchParams } from "@/types/dashboard";
+import { requireSessionPermission } from "@/lib/auth/sessionContext";
 
 export default async function ToolLogsPage({
     searchParams,
-}: {
-    searchParams: Promise<SearchParams>;
-}) {
+}: PageWithSearchParams<ToolLogsSearchParams>) {
+    const { workspaceId } = await requireSessionPermission("read");
     const params = await searchParams;
     const toolName = params.toolName?.trim() || undefined;
     const success = params.status
@@ -17,8 +13,8 @@ export default async function ToolLogsPage({
         : undefined;
 
     const [toolNames, logs] = await Promise.all([
-        toolLogRepo.getDistinctToolNames(),
-        toolLogRepo.getToolLogs({ toolName, success, limit: 200 }),
+        toolLogRepo.getDistinctToolNames(workspaceId),
+        toolLogRepo.getToolLogs(workspaceId, { toolName, success, limit: 200 }),
     ]);
 
     return (

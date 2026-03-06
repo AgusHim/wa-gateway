@@ -3,6 +3,7 @@ import { messageRepo } from "@/lib/db/messageRepo";
 import { userRepo } from "@/lib/db/userRepo";
 import { toggleBotActive } from "./actions";
 import { WaStatusCard } from "@/components/dashboard/WaStatusCard";
+import { requireSessionPermission } from "@/lib/auth/sessionContext";
 
 function formatDuration(ms: number | null): string {
     if (ms === null) return "-";
@@ -16,11 +17,12 @@ function formatDuration(ms: number | null): string {
 }
 
 export default async function DashboardOverviewPage() {
+    const { workspaceId } = await requireSessionPermission("read");
     const [totalUsers, totalMessagesToday, avgResponseMs, botConfig] = await Promise.all([
-        userRepo.getTotalUsers(),
-        messageRepo.getTodayMessageCount(),
-        messageRepo.getTodayAverageResponseTimeMs(),
-        configRepo.getBotConfig(),
+        userRepo.getTotalUsers(workspaceId),
+        messageRepo.getTodayMessageCount(workspaceId),
+        messageRepo.getTodayAverageResponseTimeMs(workspaceId),
+        configRepo.getBotConfig(workspaceId),
     ]);
 
     return (

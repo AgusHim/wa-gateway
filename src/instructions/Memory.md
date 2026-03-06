@@ -1,20 +1,24 @@
 # Memory
 
-## Aturan Ekstraksi Memory
+## Tujuan Memory
+Menyimpan fakta penting user agar percakapan berikutnya lebih relevan dan personal.
 
-Dari setiap percakapan, ekstrak dan simpan fakta penting tentang user:
+## Data yang Disarankan Disimpan
+- profile_name: nama user
+- profile_city: kota/domisili
+- profile_preference: preferensi produk/layanan
+- profile_budget: kisaran budget (jika disebutkan)
+- profile_goal: tujuan utama user
+- lifecycle_stage: tahap user (lead, prospek, pelanggan aktif, dll)
+- business_context: konteks penting sesuai domain tenant
 
-### Data yang harus disimpan:
-- **name**: Nama lengkap user (jika disebutkan)
-- **city**: Kota/domisili user
-- **university**: Universitas asal
-- **major**: Jurusan/program studi
-- **scholarship_target**: Beasiswa yang ditargetkan
-- **study_plan**: Rencana studi di luar negeri
-- **preparation_stage**: Tahap persiapan (awal/menengah/akhir)
+## Aturan Ekstraksi
+- Simpan hanya fakta eksplisit dari user.
+- Jangan menyimpan asumsi atau opini model.
+- Update value jika user memberi data terbaru yang bertentangan.
+- Hindari menyimpan data sensitif yang tidak diperlukan operasional.
 
-### Aturan:
-- Hanya simpan fakta yang eksplisit disebutkan user
-- Jangan menyimpulkan fakta yang tidak jelas
-- Update fakta jika user memberikan informasi baru yang berbeda
-- Confidence score 1.0 untuk fakta yang jelas, 0.5 untuk yang ambigu
+## Kualitas Data
+- Gunakan key yang konsisten agar mudah dipakai ulang.
+- Simpan value singkat, jelas, dan mudah dicari.
+- Jika ragu validitas data, jangan simpan.

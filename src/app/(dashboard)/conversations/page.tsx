@@ -1,45 +1,46 @@
 import Link from "next/link";
 import { messageRepo } from "@/lib/db/messageRepo";
 import { userRepo } from "@/lib/db/userRepo";
+import { channelRepo } from "@/lib/db/channelRepo";
 import { handoverRepo } from "@/lib/handover/repo";
 import { resolveUserHandoverAction } from "../actions";
+import type { ChatUserDashboardRow } from "@/lib/db/userRepo";
+import type { ConversationsSearchParams, PageWithSearchParams } from "@/types/dashboard";
+import { requireSessionPermission } from "@/lib/auth/sessionContext";
 
-type SearchParams = {
-    q?: string;
-    label?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    userId?: string;
-};
-
-function parseDate(value?: string): Date | undefined {
+function parseDate(value?: string, options?: { endOfDay?: boolean }): Date | undefined {
     if (!value) return undefined;
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? undefined : date;
+    if (Number.isNaN(date.getTime())) return undefined;
+    if (options?.endOfDay) {
+        date.setHours(23, 59, 59, 999);
+    }
+    return date;
 }
 
 export default async function ConversationsPage({
     searchParams,
-}: {
-    searchParams: Promise<SearchParams>;
-}) {
+}: PageWithSearchParams<ConversationsSearchParams>) {
+    const { workspaceId } = await requireSessionPermission("read");
     const params = await searchParams;
     const query = params.q?.trim();
     const label = params.label?.trim() || undefined;
+    const channelId = params.channelId?.trim() || undefined;
     const dateFrom = parseDate(params.dateFrom);
-    const dateTo = parseDate(params.dateTo);
+    const dateTo = parseDate(params.dateTo, { endOfDay: true });
 
-    const [users, labels] = await Promise.all([
-        userRepo.getUsersForDashboard({ query, label, dateFrom, dateTo }),
-        userRepo.getDistinctLabels(),
+    const [users, labels, channels]: [ChatUserDashboardRow[], string[], Awaited<ReturnType<typeof channelRepo.listWorkspaceChannels>>] = await Promise.all([
+        userRepo.getUsersForDashboard(workspaceId, { query, label, dateFrom, dateTo, channelId }),
+        userRepo.getDistinctLabels(workspaceId),
+        channelRepo.listWorkspaceChannels(workspaceId),
     ]);
 
     const selectedUser = users.find((u) => u.id === params.userId) ?? users[0];
     const messages = selectedUser
-        ? await messageRepo.getConversation(selectedUser.id, 1, 200)
+        ? await messageRepo.getConversation(workspaceId, selectedUser.id, 1, 200, channelId)
         : [];
     const selectedUserHandoverPending = selectedUser
-        ? await handoverRepo.isPending(selectedUser.phoneNumber)
+        ? await handoverRepo.isPending(selectedUser.phoneNumber, workspaceId)
         : false;
 
     return (
@@ -49,7 +50,7 @@ export default async function ConversationsPage({
                 <p className="text-sm text-slate-500">Riwayat chat user dengan filter pencarian.</p>
             </div>
 
-            <form className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-5">
+            <form className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-6">
                 <input
                     type="text"
                     name="q"
@@ -81,6 +82,18 @@ export default async function ConversationsPage({
                     defaultValue={params.dateTo || ""}
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm"
                 />
+                <select
+                    name="channelId"
+                    defaultValue={channelId || ""}
+                    className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                    <option value="">Semua channel</option>
+                    {channels.map((channel) => (
+                        <option key={channel.id} value={channel.id}>
+                            {channel.name} {channel.isPrimary ? "(Primary)" : ""}
+                        </option>
+                    ))}
+                </select>
                 <button type="submit" className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">
                     Filter
                 </button>
