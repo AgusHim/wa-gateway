@@ -5,6 +5,8 @@ WORKDIR /app
 
 FROM base AS deps
 COPY package*.json ./
+COPY prisma.config.ts ./
+COPY prisma ./prisma
 RUN npm ci
 
 FROM base AS builder

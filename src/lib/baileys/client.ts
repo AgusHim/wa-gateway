@@ -10,6 +10,7 @@ import { Boom } from "@hapi/boom";
 import pino from "pino";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { channelRepo } from "@/lib/db/channelRepo";
 import { billingService } from "@/lib/billing/service";
 import {
@@ -30,7 +31,10 @@ import { generateCorrelationId, generateTraceId } from "@/lib/observability/trac
 const logger = pino({ level: "silent" });
 const MAX_RETRIES = 5;
 const QR_TTL_MS = 60_000;
-const AUTH_ROOT_DIR = path.join(process.cwd(), ".wa-auth", "channels");
+const DEFAULT_AUTH_ROOT_DIR = path.join(os.tmpdir(), "wa-gateway-auth", "channels");
+const AUTH_ROOT_DIR = process.env.WA_AUTH_ROOT_DIR?.trim()
+    ? path.resolve(process.env.WA_AUTH_ROOT_DIR.trim())
+    : DEFAULT_AUTH_ROOT_DIR;
 
 type ChannelRuntimeState = {
     channelId: string;
