@@ -289,6 +289,18 @@ export async function runAgent(
             totalTokens: graphResult.metadata.totalTokens,
         });
 
+        if (graphResult.metadata.lastError) {
+            logWarn("agent.graph.workflow_failed_no_user_reply", {
+                component: "runner",
+                workspaceId,
+                channelId,
+                userId: user.id,
+                phoneNumber,
+                reason: graphResult.metadata.lastError,
+            });
+            return "";
+        }
+
         if (graphResult.metadata.totalTokens > 0) {
             await billingService.recordUsageEvent({
                 workspaceId,

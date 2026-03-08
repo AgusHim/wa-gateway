@@ -64,6 +64,7 @@ async function authorizeTenantLogin(
     password: string,
     request: { headers?: Record<string, string | string[] | undefined> } | undefined
 ): Promise<AuthenticatedUser | null> {
+    const requireEmailVerification = process.env.REQUIRE_EMAIL_VERIFICATION === "true";
     let auth = await authenticateTenantUser(email, password);
 
     if (!auth) {
@@ -75,7 +76,7 @@ async function authorizeTenantLogin(
         return null;
     }
 
-    if (!auth.user.emailVerifiedAt) {
+    if (requireEmailVerification && !auth.user.emailVerifiedAt) {
         return null;
     }
 

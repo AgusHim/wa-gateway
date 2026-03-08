@@ -1,6 +1,7 @@
 import crypto from "crypto";
 
-const KEY_ENV = process.env.CREDENTIAL_VAULT_KEY || process.env.NEXTAUTH_SECRET || "";
+const ALGORITHM = "aes-256-gcm";
+let cachedEncryptionKey: Buffer | null = null;
 
 function buildKey(secret: string): Buffer {
     if (!secret.trim()) {
@@ -10,8 +11,15 @@ function buildKey(secret: string): Buffer {
     return crypto.createHash("sha256").update(secret).digest();
 }
 
-const ENCRYPTION_KEY = buildKey(KEY_ENV);
-const ALGORITHM = "aes-256-gcm";
+function getEncryptionKey(): Buffer {
+    if (cachedEncryptionKey) {
+        return cachedEncryptionKey;
+    }
+
+    const keyEnv = process.env.CREDENTIAL_VAULT_KEY || process.env.NEXTAUTH_SECRET || "";
+    cachedEncryptionKey = buildKey(keyEnv);
+    return cachedEncryptionKey;
+}
 
 export type EncryptedPayload = {
     iv: string;
@@ -20,8 +28,9 @@ export type EncryptedPayload = {
 };
 
 export function encryptString(plainText: string): EncryptedPayload {
+    const encryptionKey = getEncryptionKey();
     const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+    const cipher = crypto.createCipheriv(ALGORITHM, encryptionKey, iv);
     const encrypted = Buffer.concat([cipher.update(plainText, "utf8"), cipher.final()]);
     const tag = cipher.getAuthTag();
 
@@ -33,11 +42,12 @@ export function encryptString(plainText: string): EncryptedPayload {
 }
 
 export function decryptString(payload: EncryptedPayload): string {
+    const encryptionKey = getEncryptionKey();
     const iv = Buffer.from(payload.iv, "base64");
     const tag = Buffer.from(payload.tag, "base64");
     const ciphertext = Buffer.from(payload.ciphertext, "base64");
 
-    const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+    const decipher = crypto.createDecipheriv(ALGORITHM, encryptionKey, iv);
     decipher.setAuthTag(tag);
 
     const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);

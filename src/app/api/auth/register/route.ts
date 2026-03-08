@@ -3,6 +3,7 @@ import {
     createEmailVerificationToken,
     registerOwnerWithOrganization,
 } from "@/lib/auth/tenantAuthService";
+import { authUserRepo } from "@/lib/db/authUserRepo";
 import { sendTenantEmail } from "@/lib/notifications/email";
 
 export const runtime = "nodejs";
@@ -52,6 +53,7 @@ export async function POST(request: NextRequest) {
     }
 
     try {
+        const requireEmailVerification = process.env.REQUIRE_EMAIL_VERIFICATION === "true";
         const { user } = await registerOwnerWithOrganization({
             name,
             email,
@@ -60,22 +62,31 @@ export async function POST(request: NextRequest) {
             workspaceName,
         });
 
-        const { rawToken } = await createEmailVerificationToken(user.id, user.email);
-        const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
-        const verificationLink = `${appUrl}/verify-email?token=${encodeURIComponent(rawToken)}`;
+        let verificationLink: string | undefined;
+        if (requireEmailVerification) {
+            const { rawToken } = await createEmailVerificationToken(user.id, user.email);
+            const appUrl = process.env.APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
+            verificationLink = `${appUrl}/verify-email?token=${encodeURIComponent(rawToken)}`;
 
-        await sendTenantEmail({
-            to: user.email,
-            subject: "Verifikasi email akun WA Gateway",
-            text: `Silakan verifikasi email Anda melalui link berikut: ${verificationLink}`,
-        });
+            await sendTenantEmail({
+                to: user.email,
+                subject: "Verifikasi email akun WA Gateway",
+                text: `Silakan verifikasi email Anda melalui link berikut: ${verificationLink}`,
+            });
+        } else {
+            await authUserRepo.markEmailVerified(user.id);
+        }
 
         return NextResponse.json({
             success: true,
-            message: "Registrasi berhasil. Cek email untuk verifikasi akun.",
+            message: requireEmailVerification
+                ? "Registrasi berhasil. Cek email untuk verifikasi akun."
+                : "Registrasi berhasil. Silakan login.",
             data: {
-                requiresEmailVerification: true,
-                verificationLinkPreview: process.env.NODE_ENV === "production" ? undefined : verificationLink,
+                requiresEmailVerification: requireEmailVerification,
+                verificationLinkPreview: requireEmailVerification && process.env.NODE_ENV !== "production"
+                    ? verificationLink
+                    : undefined,
             },
         });
     } catch (error) {
