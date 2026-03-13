@@ -9,12 +9,5 @@ else
   npx prisma db push
 fi
 
-if [ "${SKIP_DB_SEED}" != "true" ]; then
-  echo "[start] Running database seed"
-  if ! npm run db:seed; then
-    echo "[start] Seed failed, continuing startup (non-blocking)"
-  fi
-fi
-
 echo "[start] Starting Next.js server"
 exec npm run start

@@ -36,3 +36,6 @@ down:
 
 logs:
 	docker compose logs -f app
+
+migrate:
+	docker exec -i wa-gateway-postgres psql -U postgres -d wa_gateway < prisma/migrations/<timestamp>/migration.sql

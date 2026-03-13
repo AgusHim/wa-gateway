@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { channelRepo, type ChannelSendPolicy } from "@/lib/db/channelRepo";
+import { isWhatsAppProvider } from "@/lib/channel/provider";
 
 export const runtime = "nodejs";
 
@@ -92,7 +93,7 @@ export async function PATCH(
         status: status || undefined,
     });
 
-    if (updated.isEnabled) {
+    if (updated.isEnabled && isWhatsAppProvider(updated.provider)) {
         const [{ ensureInboundPartitionWorker, ensureOutboundPartitionWorker }, { ensureGatewayBootstrapped }, { connectToWhatsApp }] = await Promise.all([
             import("@/agent/bootstrap"),
             import("@/lib/runtime/bootstrapServer"),
@@ -133,8 +134,10 @@ export async function DELETE(
         );
     }
 
-    const { disconnectWhatsApp } = await import("@/lib/baileys/client");
-    await disconnectWhatsApp(existing.id, { clearSession: true });
+    if (isWhatsAppProvider(existing.provider)) {
+        const { disconnectWhatsApp } = await import("@/lib/baileys/client");
+        await disconnectWhatsApp(existing.id, { clearSession: true });
+    }
 
     const removed = await channelRepo.softDeleteChannel(existing.id);
 

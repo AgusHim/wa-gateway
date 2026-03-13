@@ -11,6 +11,7 @@ import {
     OutboundSendJob,
     getOutboundSendQueue,
 } from "../lib/queue/messageQueue";
+import { consumeInboundDebouncedBatch } from "../lib/queue/inboundDebounce";
 import { loadAllInstructions } from "../lib/instructions/loader";
 import { runAgent } from "./runner";
 import { initializeTools } from "./tools/init";
@@ -29,13 +30,53 @@ let outboundProcessorRef: ((job: Job<OutboundSendJob>) => Promise<void>) | null 
 
 function createInboundProcessor() {
     return async (job: Job<InboundMessageJob>) => withTraceSpan("pipeline.inbound.process", async () => {
-        const { workspaceId, channelId, phoneNumber, messageText, pushName } = job.data;
-        const { channelRepo } = await import("../lib/db/channelRepo");
+        const batch = await consumeInboundDebouncedBatch(job);
+        if (!batch) {
+            return;
+        }
+
+        const { workspaceId, channelId, phoneNumber, messageText, pushName } = batch.data;
+        const [{ channelRepo }, { messageRepo }, { userRepo }] = await Promise.all([
+            import("../lib/db/channelRepo"),
+            import("../lib/db/messageRepo"),
+            import("../lib/db/userRepo"),
+        ]);
 
         try {
+            const hasHumanReply = await messageRepo.hasHumanOperatorReplySince(
+                workspaceId,
+                phoneNumber,
+                new Date(batch.firstBufferedAt),
+                channelId
+            );
+            if (hasHumanReply) {
+                const user = await userRepo.upsertUser(phoneNumber, workspaceId, pushName);
+                await messageRepo.saveMessage({
+                    workspaceId,
+                    userId: user.id,
+                    role: "user",
+                    content: messageText,
+                    metadata: {
+                        channelId,
+                        source: "wa-inbound-skipped-human-operator",
+                        batchedCount: batch.batchCount,
+                        sourceMessageIds: batch.data.sourceMessageIds,
+                    },
+                });
+
+                logInfo("pipeline.inbound.skipped_human_operator_replied", {
+                    workspaceId,
+                    channelId,
+                    phoneNumber,
+                    batchedCount: batch.batchCount,
+                });
+                return;
+            }
+
             logInfo("pipeline.inbound.agent_start", {
                 phoneNumber,
                 preview: messageText.slice(0, 120),
+                batchedCount: batch.batchCount,
             });
 
             const response = await runAgent(phoneNumber, messageText, pushName, workspaceId, channelId);
@@ -43,6 +84,7 @@ function createInboundProcessor() {
                 phoneNumber,
                 responsePreview: response.slice(0, 200),
                 hasResponse: Boolean(response),
+                batchedCount: batch.batchCount,
             });
 
             if (!response) {
@@ -62,9 +104,9 @@ function createInboundProcessor() {
                 text: response,
                 mode: "chat",
                 requestedAt: Date.now(),
-                traceId: job.data.traceId,
-                correlationId: job.data.correlationId,
-                sourceMessageId: job.data.messageId,
+                traceId: batch.data.traceId,
+                correlationId: batch.data.correlationId,
+                sourceMessageId: batch.data.messageId,
             });
         } catch (error) {
             logError("pipeline.inbound.process_failed", error, {

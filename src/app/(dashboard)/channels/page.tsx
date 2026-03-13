@@ -42,6 +42,7 @@ type ChannelAudit = {
 };
 
 type ChannelFormState = {
+    provider: "whatsapp" | "instagram";
     name: string;
     identifier: string;
     rateLimitPerSecond: string;
@@ -55,6 +56,7 @@ type ChannelFormState = {
 };
 
 const EMPTY_FORM: ChannelFormState = {
+    provider: "whatsapp",
     name: "",
     identifier: "",
     rateLimitPerSecond: "5",
@@ -100,6 +102,7 @@ function toFormState(channel: ChannelRuntime): ChannelFormState {
     const policy = readPolicy(channel.policy);
 
     return {
+        provider: channel.provider === "instagram" ? "instagram" : "whatsapp",
         name: channel.name,
         identifier: channel.identifier || "",
         rateLimitPerSecond: String(channel.rateLimitPerSecond || 5),
@@ -198,6 +201,7 @@ export default function ChannelsPage() {
         () => channels.find((channel) => channel.channelId === selectedChannelId) ?? channels[0] ?? null,
         [channels, selectedChannelId]
     );
+    const isWhatsAppSelected = selectedChannel?.provider === "whatsapp";
     const selectedQr = selectedChannel ? qrByChannel[selectedChannel.channelId] || "" : "";
 
     const refreshChannels = async (keepMessage = false) => {
@@ -365,11 +369,12 @@ export default function ChannelsPage() {
 
         try {
             const payload = {
+                provider: createForm.provider,
                 name: createForm.name,
                 identifier: createForm.identifier || undefined,
                 isPrimary: createForm.isPrimary,
                 rateLimitPerSecond: Number(createForm.rateLimitPerSecond || "5"),
-                autoConnect: true,
+                autoConnect: createForm.provider === "whatsapp",
                 ...buildPolicyPayload(createForm),
             };
 
@@ -518,6 +523,24 @@ export default function ChannelsPage() {
                 <form onSubmit={createChannel} className="rounded-lg border border-slate-200 bg-white p-4">
                     <h2 className="text-base font-semibold text-slate-900">Tambah Channel</h2>
                     <div className="mt-3 grid gap-4">
+                        <FormField
+                            label="Provider"
+                            helper="Pilih channel provider. WhatsApp akan auto connect, Instagram disiapkan untuk integrasi berikutnya."
+                        >
+                            <select
+                                id="create-provider"
+                                value={createForm.provider}
+                                onChange={(event) => setCreateForm((prev) => ({
+                                    ...prev,
+                                    provider: event.target.value === "instagram" ? "instagram" : "whatsapp",
+                                }))}
+                                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                            >
+                                <option value="whatsapp">WhatsApp</option>
+                                <option value="instagram">Instagram</option>
+                            </select>
+                        </FormField>
+
                         <FormField
                             label="Nama Channel"
                             helper="Nama internal channel untuk membedakan akun WhatsApp di dashboard."
@@ -691,7 +714,7 @@ export default function ChannelsPage() {
                                                     >
                                                         {channel.name} {channel.isPrimary ? "(Primary)" : ""}
                                                         <p className="text-xs text-slate-500">
-                                                            {channel.identifier || "-"}
+                                                            {channel.provider} | {channel.identifier || "-"}
                                                         </p>
                                                     </button>
                                                 </td>
@@ -712,7 +735,7 @@ export default function ChannelsPage() {
                 <div className="grid gap-6 xl:grid-cols-2">
                     <form onSubmit={saveChannel} className="rounded-lg border border-slate-200 bg-white p-4">
                         <h2 className="text-base font-semibold text-slate-900">Edit Channel</h2>
-                        <p className="mt-1 text-xs text-slate-500">{selectedChannel.channelId}</p>
+                        <p className="mt-1 text-xs text-slate-500">{selectedChannel.channelId} | {selectedChannel.provider}</p>
 
                         <div className="mt-3 grid gap-4">
                             <FormField
@@ -855,7 +878,9 @@ export default function ChannelsPage() {
                         <div className="rounded-lg border border-slate-200 bg-white p-4">
                             <h2 className="text-base font-semibold text-slate-900">QR Pairing</h2>
                             <p className="mt-1 text-xs text-slate-500">
-                                Scan QR untuk menghubungkan akun WhatsApp ke channel ini.
+                                {isWhatsAppSelected
+                                    ? "Scan QR untuk menghubungkan akun WhatsApp ke channel ini."
+                                    : "QR pairing hanya tersedia untuk provider WhatsApp."}
                             </p>
 
                             <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
@@ -882,7 +907,9 @@ export default function ChannelsPage() {
                                     />
                                 ) : (
                                     <div className="flex h-[300px] w-[300px] max-w-full items-center justify-center rounded border border-dashed border-slate-300 text-sm text-slate-500">
-                                        Belum ada QR. Klik Connect atau Reset Session.
+                                        {isWhatsAppSelected
+                                            ? "Belum ada QR. Klik Connect atau Reset Session."
+                                            : "Provider ini tidak memakai QR WhatsApp."}
                                     </div>
                                 )}
                             </div>
@@ -894,7 +921,7 @@ export default function ChannelsPage() {
                                 <button
                                     type="button"
                                     onClick={() => void runChannelAction("connect")}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !isWhatsAppSelected}
                                     className="rounded-md border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     Connect
@@ -902,7 +929,7 @@ export default function ChannelsPage() {
                                 <button
                                     type="button"
                                     onClick={() => void runChannelAction("disconnect")}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !isWhatsAppSelected}
                                     className="rounded-md border border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     Disconnect
@@ -910,7 +937,7 @@ export default function ChannelsPage() {
                                 <button
                                     type="button"
                                     onClick={() => void runChannelAction("reset")}
-                                    disabled={isSubmitting}
+                                    disabled={isSubmitting || !isWhatsAppSelected}
                                     className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                     Reset Session

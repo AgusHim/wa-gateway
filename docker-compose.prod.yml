@@ -1,45 +1,49 @@
+name: buzzerp
+
 services:
   postgres:
     image: postgres:18-alpine
     container_name: wa-gateway-postgres
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: wa_gateway
     ports:
-      - "5433:5432"
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - ./.docker-data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d wa_gateway"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - internal
 
   redis:
     image: redis:8.6-alpine
     container_name: wa-gateway-redis
     restart: unless-stopped
-    ports:
-      - "6380:6379"
     volumes:
-      - ./.docker-data/redis:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - internal
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
     image: gushim/wa-buzzerp:latest
+    pull_policy: always
     container_name: wa-gateway-app
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      DATABASE_URL: postgresql://postgres:password@postgres:5432/wa_gateway?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://redis:6379
     depends_on:
       postgres:
@@ -48,3 +52,15 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+    networks:
+      - internal
+
+volumes:
+  postgres_data:
+    name: buzzerp_postgres_data
+  redis_data:
+    name: buzzerp_redis_data
+
+networks:
+  internal:
+    driver: bridge

@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
 
     await ensureGatewayBootstrapped();
 
-    const channels = await getWorkspaceChannelRuntimeStatus(auth.context.workspaceId);
+    const channels = await getWorkspaceChannelRuntimeStatus(auth.context.workspaceId, {
+        provider: "whatsapp",
+    });
     const primary = channels.find((channel) => channel.isPrimary) ?? channels[0] ?? null;
     const selected = selectedChannelId
         ? channels.find((channel) => channel.channelId === selectedChannelId) ?? primary

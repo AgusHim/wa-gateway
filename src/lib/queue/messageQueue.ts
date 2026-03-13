@@ -13,6 +13,11 @@ export interface InboundMessageJob {
     enqueuedAt: number;
     correlationId?: string;
     traceId?: string;
+    debounceKey?: string;
+    debounceReady?: boolean;
+    debouncedCount?: number;
+    firstBufferedAt?: number;
+    sourceMessageIds?: string[];
 }
 
 export interface OutboundSendJob {

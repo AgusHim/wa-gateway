@@ -1,6 +1,8 @@
 import { prisma } from "./client";
 import { Prisma } from "@prisma/client";
 import { assertTenantScope } from "@/lib/tenant/context";
+import { resolveChannelUserDisplayName, resolveChannelUserIdentifier } from "../channel/identity";
+import { ChannelProvider } from "../channel/provider";
 
 export type DashboardUserFilters = {
     query?: string;
@@ -100,6 +102,44 @@ export const userRepo = {
             },
             update: { name: name ?? undefined },
             create: { workspaceId: resolvedWorkspaceId, phoneNumber, name },
+        });
+    },
+
+    async upsertUserByChannelIdentity(input: {
+        workspaceId: string;
+        provider: ChannelProvider | string;
+        phoneNumber?: string;
+        externalUserId?: string;
+        username?: string;
+        name?: string;
+    }) {
+        const resolvedWorkspaceId = assertTenantScope(input.workspaceId);
+        const identifier = resolveChannelUserIdentifier({
+            provider: input.provider,
+            phoneNumber: input.phoneNumber,
+            externalUserId: input.externalUserId,
+            username: input.username,
+        });
+        const resolvedName = input.name?.trim()
+            || resolveChannelUserDisplayName({
+                provider: input.provider,
+                externalUserId: input.externalUserId,
+                username: input.username,
+            });
+
+        return prisma.chatUser.upsert({
+            where: {
+                workspaceId_phoneNumber: {
+                    workspaceId: resolvedWorkspaceId,
+                    phoneNumber: identifier,
+                },
+            },
+            update: { name: resolvedName ?? undefined },
+            create: {
+                workspaceId: resolvedWorkspaceId,
+                phoneNumber: identifier,
+                name: resolvedName,
+            },
         });
     },
 

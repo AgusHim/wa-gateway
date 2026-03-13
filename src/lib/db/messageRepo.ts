@@ -60,6 +60,58 @@ export const messageRepo = {
         });
     },
 
+    async hasHumanOperatorReplySince(
+        workspaceId: string,
+        phoneNumber: string,
+        since: Date,
+        channelId?: string
+    ): Promise<boolean> {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
+        const normalizedPhoneNumber = phoneNumber.trim();
+        if (!normalizedPhoneNumber) {
+            return false;
+        }
+
+        const metadataClauses: Prisma.MessageWhereInput[] = [{
+            metadata: {
+                path: ["source"],
+                equals: "human-operator",
+            },
+        }];
+
+        const normalizedChannelId = channelId?.trim();
+        if (normalizedChannelId) {
+            metadataClauses.push({
+                metadata: {
+                    path: ["channelId"],
+                    equals: normalizedChannelId,
+                },
+            });
+        }
+
+        const message = await prisma.message.findFirst({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                role: "assistant",
+                createdAt: {
+                    gte: since,
+                },
+                user: {
+                    is: {
+                        workspaceId: resolvedWorkspaceId,
+                        phoneNumber: normalizedPhoneNumber,
+                    },
+                },
+                AND: metadataClauses,
+            },
+            select: {
+                id: true,
+            },
+        });
+
+        return Boolean(message?.id);
+    },
+
     async getTodayMessageCount(workspaceId: string) {
         const resolvedWorkspaceId = assertTenantScope(workspaceId);
         const today = new Date();

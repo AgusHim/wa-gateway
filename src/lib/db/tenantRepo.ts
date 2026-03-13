@@ -1,6 +1,7 @@
 import { prisma } from "./client";
 import { TenantRole } from "@prisma/client";
 import { getDefaultTenantContext } from "@/lib/tenant/context";
+import { normalizeChannelProvider } from "@/lib/channel/provider";
 
 export const tenantRepo = {
     async ensureDefaultTenant() {
@@ -39,7 +40,7 @@ export const tenantRepo = {
                 id: channelId,
                 workspaceId,
                 name: "Default WA Channel",
-                provider: "whatsapp",
+                provider: normalizeChannelProvider("whatsapp"),
                 status: "active",
             },
         });
@@ -80,7 +81,7 @@ export const tenantRepo = {
                 channels: {
                     create: {
                         name: `Sandbox WA ${suffix}`,
-                        provider: "whatsapp",
+                        provider: normalizeChannelProvider("whatsapp"),
                         status: "active",
                         isEnabled: true,
                         isPrimary: true,

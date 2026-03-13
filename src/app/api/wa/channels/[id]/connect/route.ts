@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { channelRepo } from "@/lib/db/channelRepo";
+import { isWhatsAppProvider } from "@/lib/channel/provider";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,15 @@ export async function POST(
                 message: "Channel not found",
             },
             { status: 404 }
+        );
+    }
+    if (!isWhatsAppProvider(channel.provider)) {
+        return NextResponse.json(
+            {
+                success: false,
+                message: "Connect API ini hanya untuk channel provider whatsapp",
+            },
+            { status: 400 }
         );
     }
 

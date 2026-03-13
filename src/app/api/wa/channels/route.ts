@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { billingService } from "@/lib/billing/service";
 import { channelRepo, type ChannelSendPolicy } from "@/lib/db/channelRepo";
+import { parseChannelProvider } from "@/lib/channel/provider";
 
 export const runtime = "nodejs";
 
@@ -79,7 +80,17 @@ export async function POST(request: NextRequest) {
 
     const name = readString(payload.name);
     const identifier = readString(payload.identifier);
-    const provider = readString(payload.provider) || "whatsapp";
+    const providerRaw = payload.provider !== undefined ? readString(payload.provider) : "whatsapp";
+    const provider = parseChannelProvider(providerRaw);
+    if (!provider) {
+        return NextResponse.json(
+            {
+                success: false,
+                message: "provider is invalid. allowed: whatsapp, instagram",
+            },
+            { status: 400 }
+        );
+    }
     const isPrimary = payload.isPrimary === true;
     const autoConnect = payload.autoConnect !== false;
 
@@ -119,7 +130,7 @@ export async function POST(request: NextRequest) {
         isPrimary,
     });
 
-    if (autoConnect) {
+    if (autoConnect && provider === "whatsapp") {
         const [{ connectToWhatsApp }, { ensureInboundPartitionWorker, ensureOutboundPartitionWorker }, { ensureGatewayBootstrapped }] = await Promise.all([
             import("@/lib/baileys/client"),
             import("@/agent/bootstrap"),

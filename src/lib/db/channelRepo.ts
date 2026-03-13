@@ -1,6 +1,7 @@
 import { ChannelHealthStatus, Prisma } from "@prisma/client";
 import { prisma } from "./client";
 import { assertTenantScope } from "@/lib/tenant/context";
+import { ChannelProvider, normalizeChannelProvider } from "@/lib/channel/provider";
 
 export type ChannelSendPolicy = {
     allowlist?: string[];
@@ -41,22 +42,26 @@ export type ChannelAuditWithChannel = Prisma.ChannelAuditGetPayload<{
 }>;
 
 export const channelRepo = {
-    async listWorkspaceChannels(workspaceId: string, options?: { includeRemoved?: boolean }) {
+    async listWorkspaceChannels(workspaceId: string, options?: { includeRemoved?: boolean; provider?: ChannelProvider | string }) {
         const resolvedWorkspaceId = assertTenantScope(workspaceId);
         const includeRemoved = options?.includeRemoved === true;
+        const provider = options?.provider ? normalizeChannelProvider(options.provider) : undefined;
 
         return prisma.channel.findMany({
             where: {
                 workspaceId: resolvedWorkspaceId,
+                provider,
                 ...(includeRemoved ? {} : { status: { not: "removed" } }),
             },
             orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
         });
     },
 
-    async listActiveRuntimeChannels() {
+    async listActiveRuntimeChannels(provider: ChannelProvider | string = "whatsapp") {
+        const resolvedProvider = normalizeChannelProvider(provider);
         return prisma.channel.findMany({
             where: {
+                provider: resolvedProvider,
                 isEnabled: true,
                 status: { not: "removed" },
                 workspace: { isActive: true },
@@ -164,7 +169,7 @@ export const channelRepo = {
     async createChannel(input: {
         workspaceId: string;
         name: string;
-        provider?: string;
+        provider?: ChannelProvider | string;
         identifier?: string;
         rateLimitPerSecond?: number;
         policy?: ChannelSendPolicy | null;
@@ -172,12 +177,13 @@ export const channelRepo = {
     }) {
         const resolvedWorkspaceId = assertTenantScope(input.workspaceId);
         const sanitizedPolicy = sanitizePolicy(input.policy ?? {});
+        const provider = normalizeChannelProvider(input.provider);
 
         const channel = await prisma.channel.create({
             data: {
                 workspaceId: resolvedWorkspaceId,
                 name: input.name.trim(),
-                provider: input.provider?.trim() || "whatsapp",
+                provider,
                 identifier: input.identifier?.trim() || null,
                 status: "active",
                 isEnabled: true,

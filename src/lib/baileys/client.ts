@@ -22,6 +22,7 @@ import {
     WAHealthStatus,
 } from "./events";
 import { getInboundMessageQueue } from "../queue/messageQueue";
+import { enqueueInboundWithDebounce } from "../queue/inboundDebounce";
 import { sessionRepo } from "../db/sessionRepo";
 import { getDefaultTenantContext } from "../tenant/context";
 import { withObservationContext } from "@/lib/observability/context";
@@ -511,7 +512,7 @@ function attachSocketEventHandlers(
                 });
 
                 const inboundQueue = getInboundMessageQueue(runtime.workspaceId, runtime.channelId);
-                await inboundQueue.add(`inbound:${runtime.channelId}`, {
+                await enqueueInboundWithDebounce(inboundQueue, {
                     workspaceId: runtime.workspaceId,
                     channelId: runtime.channelId,
                     phoneNumber,
@@ -789,8 +790,13 @@ export async function disconnectWhatsApp(
     }));
 }
 
-export async function getWorkspaceChannelRuntimeStatus(workspaceId: string) {
-    const channels = await channelRepo.listWorkspaceChannels(workspaceId);
+export async function getWorkspaceChannelRuntimeStatus(
+    workspaceId: string,
+    options?: { provider?: string }
+) {
+    const channels = await channelRepo.listWorkspaceChannels(workspaceId, {
+        provider: options?.provider,
+    });
 
     const statusSessions = await Promise.all(channels.map((channel) => sessionRepo.getSession(statusSessionKey(channel.id))));
     const qrSessions = await Promise.all(channels.map((channel) => sessionRepo.getSession(qrSessionKey(channel.id))));

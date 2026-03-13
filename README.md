@@ -29,10 +29,40 @@ Run all services (Postgres, Redis, App):
 docker compose up -d --build
 ```
 
-The app container startup flow (`start.sh`):
-1. `prisma migrate deploy`
-2. Optional seed (skip when `SKIP_DB_SEED=true`)
-3. `next start`
+Data persistence:
+- Postgres data is stored in `./.docker-data/postgres`
+- Redis data is stored in `./.docker-data/redis`
+- `docker compose down` will not remove this data
+- To reset data intentionally, remove `./.docker-data`
+
+### VPS Production (pull image from Docker Hub)
+
+1. Build and push image from local:
+   ```bash
+   docker build -t gushim/wa-buzzerp:latest .
+   docker push gushim/wa-buzzerp:latest
+   ```
+2. In VPS, prepare env:
+   ```bash
+   cp .env.production.example .env.production
+   ```
+3. Deploy on VPS:
+   ```bash
+   docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+   ```
+4. Update release on VPS:
+   ```bash
+   docker compose --env-file .env.production -f docker-compose.prod.yml pull app
+   docker compose --env-file .env.production -f docker-compose.prod.yml up -d app
+   ```
+
+The app container startup flow:
+1. `next start` only (no automatic Prisma migration/seed)
+
+Manual migration via SQL (example):
+```bash
+docker exec -i wa-gateway-postgres psql -U postgres -d wa_gateway < prisma/migrations/<timestamp>/migration.sql
+```
 
 ## Important Environment Variables
 
