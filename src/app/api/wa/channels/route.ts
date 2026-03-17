@@ -3,6 +3,7 @@ import { requireApiSession } from "@/lib/auth/apiSession";
 import { billingService } from "@/lib/billing/service";
 import { channelRepo, type ChannelSendPolicy } from "@/lib/db/channelRepo";
 import { parseChannelProvider } from "@/lib/channel/provider";
+import { resolveInstagramLaunchMode } from "@/lib/integrations/instagram/launchMode";
 
 export const runtime = "nodejs";
 
@@ -47,14 +48,40 @@ export async function GET() {
         return auth.response;
     }
 
-    const { getWorkspaceChannelRuntimeStatus } = await import("@/lib/baileys/client");
-    const channels = await getWorkspaceChannelRuntimeStatus(auth.context.workspaceId);
+    const [{ getWorkspaceChannelRuntimeStatus }, { instagramRepo }, { instagramChannelRepo }] = await Promise.all([
+        import("@/lib/baileys/client"),
+        import("@/lib/integrations/instagram/repo"),
+        import("@/lib/integrations/instagram/channelRepo"),
+    ]);
+    const [channels, instagramBindings, instagramConfigs] = await Promise.all([
+        getWorkspaceChannelRuntimeStatus(auth.context.workspaceId),
+        instagramRepo.listWorkspaceBindings(auth.context.workspaceId),
+        instagramChannelRepo.listWorkspaceChannelConfigs(auth.context.workspaceId),
+    ]);
+    const instagramBindingByChannelId = new Map(instagramBindings.map((item) => [item.channelId, item]));
+    const instagramConfigByChannelId = new Map(instagramConfigs.map((item) => [item.channelId, item]));
 
     return NextResponse.json({
         success: true,
         data: {
             workspaceId: auth.context.workspaceId,
-            channels,
+            channels: channels.map((channel) => {
+                const instagramBinding = instagramBindingByChannelId.get(channel.channelId) || null;
+                const instagramConfig = instagramConfigByChannelId.get(channel.channelId) || null;
+                return {
+                    ...channel,
+                    instagramBinding: instagramBinding
+                        ? {
+                            ...instagramBinding,
+                            lastWebhookAt: instagramConfig?.lastWebhookAt || null,
+                            webhookSubscribedAt: instagramConfig?.webhookSubscribedAt || null,
+                        }
+                        : null,
+                    instagramLaunchMode: channel.provider === "instagram"
+                        ? resolveInstagramLaunchMode(auth.context.workspaceId)
+                        : null,
+                };
+            }),
         },
     });
 }

@@ -1,4 +1,4 @@
-import { BillingCycle, PaymentProvider, PlanCode, PrismaClient, SubscriptionStatus } from "@prisma/client";
+import { BillingCycle, ChannelProvider, PaymentProvider, PlanCode, PrismaClient, SubscriptionStatus } from "@prisma/client";
 
 const prisma = new PrismaClient({});
 const defaultOrganizationId = process.env.DEFAULT_ORGANIZATION_ID || "default-org";
@@ -92,12 +92,15 @@ async function main() {
         where: { id: defaultChannelId },
         update: {
             workspaceId: defaultWorkspaceId,
+            provider: "whatsapp",
+            providerType: ChannelProvider.WHATSAPP,
         },
         create: {
             id: defaultChannelId,
             workspaceId: defaultWorkspaceId,
             name: "Default WA Channel",
             provider: "whatsapp",
+            providerType: ChannelProvider.WHATSAPP,
             status: "active",
         },
     });

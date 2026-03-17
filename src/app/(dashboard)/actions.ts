@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db/client";
 import { requireSessionPermission, requireSessionTenantContext } from "@/lib/auth/sessionContext";
 import { configRepo } from "@/lib/db/configRepo";
 import { memoryRepo } from "@/lib/db/memoryRepo";
+import { messageRepo } from "@/lib/db/messageRepo";
 import { userRepo } from "@/lib/db/userRepo";
 import { workspaceApiKeyRepo } from "@/lib/db/workspaceApiKeyRepo";
 import { workspaceCredentialRepo } from "@/lib/db/workspaceCredentialRepo";
@@ -18,9 +19,19 @@ import { createOrganizationInvite } from "@/lib/auth/tenantAuthService";
 import { handoverRepo } from "@/lib/handover/repo";
 import { campaignService } from "@/lib/automation/campaignService";
 import { webhookService } from "@/lib/integrations/webhookService";
+import {
+    InstagramAutoReplyRules,
+    upsertWorkspaceInstagramAutoReplyRules,
+} from "@/lib/integrations/instagram/ruleConfig";
 import { knowledgeService } from "@/lib/knowledge/service";
 import { sendTenantEmail } from "@/lib/notifications/email";
+import { replayWorkspaceDeadLetter } from "@/lib/observability/deadLetter";
+import { assertTrustedServerActionOrigin } from "@/lib/security/csrf";
 import { invalidateWorkspaceRuntimeFlags } from "@/lib/tenant/flags";
+
+async function assertSensitiveActionRequest() {
+    await assertTrustedServerActionOrigin();
+}
 
 export async function toggleBotActive(formData: FormData) {
     const { workspaceId } = await requireSessionPermission("manage_channel");
@@ -133,6 +144,7 @@ export async function activatePromptVersionAction(formData: FormData) {
 }
 
 export async function upsertWorkspaceCredentialAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId, userId } = await requireSessionPermission("manage_channel");
 
     const provider = String(formData.get("provider") || "custom").trim();
@@ -155,6 +167,7 @@ export async function upsertWorkspaceCredentialAction(formData: FormData) {
 }
 
 export async function deleteWorkspaceCredentialAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId } = await requireSessionPermission("manage_channel");
     const name = String(formData.get("name") || "").trim();
     if (!name) {
@@ -305,6 +318,7 @@ export async function archiveKnowledgeSourceAction(formData: FormData) {
 }
 
 export async function createWorkspaceApiKeyAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId, userId } = await requireSessionPermission("manage_channel");
 
     const name = String(formData.get("name") || "").trim();
@@ -333,6 +347,7 @@ export async function createWorkspaceApiKeyAction(formData: FormData) {
 }
 
 export async function rotateWorkspaceApiKeyAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId } = await requireSessionPermission("manage_channel");
     const keyId = String(formData.get("keyId") || "").trim();
     if (!keyId) {
@@ -345,6 +360,7 @@ export async function rotateWorkspaceApiKeyAction(formData: FormData) {
 }
 
 export async function revokeWorkspaceApiKeyAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId } = await requireSessionPermission("manage_channel");
     const keyId = String(formData.get("keyId") || "").trim();
     if (!keyId) {
@@ -356,6 +372,7 @@ export async function revokeWorkspaceApiKeyAction(formData: FormData) {
 }
 
 export async function createWebhookEndpointAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId, userId } = await requireSessionPermission("manage_channel");
 
     const name = String(formData.get("name") || "").trim();
@@ -390,6 +407,7 @@ export async function createWebhookEndpointAction(formData: FormData) {
 }
 
 export async function updateWebhookEndpointStatusAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId } = await requireSessionPermission("manage_channel");
     const endpointId = String(formData.get("endpointId") || "").trim();
     const statusRaw = String(formData.get("status") || "").trim().toUpperCase();
@@ -405,6 +423,7 @@ export async function updateWebhookEndpointStatusAction(formData: FormData) {
 }
 
 export async function replayWebhookDeliveryAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { workspaceId } = await requireSessionPermission("manage_channel");
     const deliveryId = String(formData.get("deliveryId") || "").trim();
     if (!deliveryId) {
@@ -415,7 +434,43 @@ export async function replayWebhookDeliveryAction(formData: FormData) {
     revalidatePath("/integrations");
 }
 
+export async function replayDeadLetterJobAction(formData: FormData) {
+    await assertSensitiveActionRequest();
+    const { workspaceId } = await requireSessionPermission("manage_channel");
+    const directionRaw = String(formData.get("direction") || "").trim().toLowerCase();
+    const dlqJobId = String(formData.get("dlqJobId") || "").trim();
+    const channelId = String(formData.get("channelId") || "").trim() || undefined;
+    const windowMinutes = String(formData.get("windowMinutes") || "").trim();
+
+    if (directionRaw !== "inbound" && directionRaw !== "outbound") {
+        throw new Error("direction is required");
+    }
+
+    if (!dlqJobId) {
+        throw new Error("dlqJobId is required");
+    }
+
+    await replayWorkspaceDeadLetter({
+        workspaceId,
+        direction: directionRaw,
+        dlqJobId,
+        channelId,
+    });
+
+    revalidatePath("/observability");
+
+    const params = new URLSearchParams();
+    if (windowMinutes) {
+        params.set("windowMinutes", windowMinutes);
+    }
+    params.set("replay", "success");
+    params.set("direction", directionRaw);
+
+    redirect(`/observability?${params.toString()}`);
+}
+
 export async function createSandboxWorkspaceAction() {
+    await assertSensitiveActionRequest();
     const { organizationId, userId } = await requireSessionTenantContext([TenantRole.OWNER, TenantRole.ADMIN]);
     const { tenantRepo } = await import("@/lib/db/tenantRepo");
     const workspace = await tenantRepo.createSandboxWorkspace({
@@ -639,6 +694,107 @@ export async function resolveUserHandoverAction(formData: FormData) {
     revalidatePath("/conversations");
 }
 
+export async function takeoverInstagramThreadAction(formData: FormData) {
+    const { workspaceId, userId: actorUserId } = await requireSessionPermission("write");
+    const userId = String(formData.get("userId") || "").trim();
+    const threadId = String(formData.get("threadId") || "").trim();
+    const channelId = String(formData.get("channelId") || "").trim() || undefined;
+
+    if (!userId || !threadId) {
+        throw new Error("userId dan threadId wajib diisi");
+    }
+
+    const user = await userRepo.getUserById(userId, workspaceId);
+    if (!user) {
+        throw new Error("User tidak ditemukan");
+    }
+
+    await messageRepo.setInstagramThreadAutoReplyState({
+        workspaceId,
+        userId: user.id,
+        threadId,
+        channelId,
+        enabled: false,
+        changedBy: `operator:${actorUserId}`,
+    });
+
+    await handoverRepo.markPending({
+        workspaceId,
+        phoneNumber: user.phoneNumber,
+        userId: user.id,
+        topic: "instagram_thread_takeover",
+        keyword: threadId,
+        triggeredBy: "operator_takeover",
+    });
+
+    revalidatePath("/conversations");
+    revalidatePath("/users");
+}
+
+export async function toggleInstagramThreadAutoReplyAction(formData: FormData) {
+    const { workspaceId, userId: actorUserId } = await requireSessionPermission("write");
+    const userId = String(formData.get("userId") || "").trim();
+    const threadId = String(formData.get("threadId") || "").trim();
+    const channelId = String(formData.get("channelId") || "").trim() || undefined;
+    const enabled = formData.get("enabled") === "true";
+
+    if (!userId || !threadId) {
+        throw new Error("userId dan threadId wajib diisi");
+    }
+
+    const user = await userRepo.getUserById(userId, workspaceId);
+    if (!user) {
+        throw new Error("User tidak ditemukan");
+    }
+
+    await messageRepo.setInstagramThreadAutoReplyState({
+        workspaceId,
+        userId: user.id,
+        threadId,
+        channelId,
+        enabled,
+        changedBy: `operator:${actorUserId}`,
+    });
+
+    revalidatePath("/conversations");
+}
+
+function parseCommaList(value: string): string[] {
+    return value
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+export async function updateInstagramAutoReplyRulesAction(formData: FormData) {
+    const { workspaceId, userId } = await requireSessionPermission("manage_channel");
+
+    const rules: InstagramAutoReplyRules = {
+        comment: {
+            enabled: formData.get("commentEnabled") === "true",
+            keywordMode: formData.get("commentKeywordMode") === "keywords" ? "keywords" : "all",
+            keywords: parseCommaList(String(formData.get("commentKeywords") || "")),
+            sentimentThreshold: Number(formData.get("commentSentimentThreshold")),
+        },
+        dm: {
+            enabled: formData.get("dmEnabled") === "true",
+            keywordMode: formData.get("dmKeywordMode") === "keywords" ? "keywords" : "all",
+            keywords: parseCommaList(String(formData.get("dmKeywords") || "")),
+            businessHoursOnly: formData.get("dmBusinessHoursOnly") === "true",
+            fallbackMessage: String(formData.get("dmFallbackMessage") || "").trim(),
+            escalationPolicy: String(formData.get("dmEscalationPolicy") || "none").trim() || "none",
+        },
+    };
+
+    await upsertWorkspaceInstagramAutoReplyRules({
+        workspaceId,
+        userId,
+        rules,
+    });
+
+    revalidatePath("/config");
+}
+
 export async function upsertUserMemoryAction(formData: FormData) {
     const { workspaceId } = await requireSessionPermission("write");
 
@@ -734,6 +890,7 @@ export async function revokeAllAuthSessionsAction() {
 }
 
 export async function changeBillingPlanAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { organizationId } = await requireSessionPermission("manage_billing");
 
     const planCodeRaw = String(formData.get("planCode") || PlanCode.FREE);
@@ -756,6 +913,7 @@ export async function changeBillingPlanAction(formData: FormData) {
 }
 
 export async function cancelBillingSubscriptionAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     const { organizationId } = await requireSessionPermission("manage_billing");
     const immediate = formData.get("immediate") === "true";
 
@@ -764,6 +922,7 @@ export async function cancelBillingSubscriptionAction(formData: FormData) {
 }
 
 export async function retryFailedBillingEventsAction(formData: FormData) {
+    await assertSensitiveActionRequest();
     await requireSessionPermission("manage_billing");
 
     const limitRaw = Number(formData.get("limit"));

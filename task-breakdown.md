@@ -206,9 +206,9 @@
 ## 🛡️ Domain 10 — Security, Privacy, dan Compliance
 
 ### 10.1 Security Baseline
-- [ ] Enforce secure headers + CSRF strategy untuk form kritikal.
-- [ ] Encryption at rest untuk secret dan session sensitif.
-- [ ] Secret rotation policy.
+- [x] Enforce secure headers + CSRF strategy untuk form kritikal.
+- [x] Encryption at rest untuk secret dan session sensitif.
+- [x] Secret rotation policy.
 
 ### 10.2 Audit & Governance
 - [ ] Audit log untuk aksi sensitif (billing, role change, channel reset, API key rotate).

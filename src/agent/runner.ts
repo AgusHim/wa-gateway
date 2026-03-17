@@ -14,10 +14,59 @@ const NON_PERSISTED_ASSISTANT_MARKERS = [
     "Maaf, sistem sedang mengalami kendala.",
 ];
 
+export type AgentInboundSource = "wa-inbound" | "instagram-dm" | "instagram-comment";
+
+export type RunAgentOptions = {
+    source?: AgentInboundSource;
+    provider?: "whatsapp" | "instagram";
+    skipInboundBilling?: boolean;
+    externalUserId?: string;
+    username?: string;
+    threadId?: string;
+    commentId?: string;
+    mediaId?: string;
+    eventId?: string;
+    eventKey?: string;
+    batchCount?: number;
+    sourceEventIds?: string[];
+};
+
 function shouldPersistAssistantMessage(content: string): boolean {
     const normalized = content.trim();
     if (!normalized) return false;
     return !NON_PERSISTED_ASSISTANT_MARKERS.some((marker) => normalized.includes(marker));
+}
+
+function normalizeSource(value?: string): AgentInboundSource {
+    if (value === "instagram-dm" || value === "instagram-comment") {
+        return value;
+    }
+    return "wa-inbound";
+}
+
+function buildGraphIncomingMessage(source: AgentInboundSource, incomingMessage: string): string {
+    if (source === "instagram-comment") {
+        return [
+            "[KONTEKS CHANNEL: INSTAGRAM COMMENT]",
+            "Balasan ini untuk komentar publik Instagram. Gunakan gaya ringkas, sopan, dan aman untuk publik.",
+            "Jika butuh detail sensitif, arahkan lanjut ke DM.",
+            "",
+            "Komentar user:",
+            incomingMessage,
+        ].join("\n");
+    }
+
+    if (source === "instagram-dm") {
+        return [
+            "[KONTEKS CHANNEL: INSTAGRAM DM]",
+            "Balasan ini untuk DM 1:1 Instagram. Tetap ringkas, jelas, dan actionable.",
+            "",
+            "Pesan user:",
+            incomingMessage,
+        ].join("\n");
+    }
+
+    return incomingMessage;
 }
 
 export async function runAgentWithExecutor(
@@ -38,14 +87,15 @@ export async function runAgentWithExecutor(
 }
 
 /**
- * Main runner entrypoint for inbound WhatsApp messages.
+ * Main runner entrypoint for inbound channel messages.
  */
 export async function runAgent(
     phoneNumber: string,
     incomingMessage: string,
     pushName?: string,
     workspaceIdInput?: string,
-    channelIdInput?: string
+    channelIdInput?: string,
+    options?: RunAgentOptions
 ): Promise<string> {
     return withTraceSpan("pipeline.agent.run", async () => {
         const [
@@ -81,6 +131,9 @@ export async function runAgent(
         const { workspaceId: defaultWorkspaceId, channelId: defaultChannelId } = getDefaultTenantContext();
         const workspaceId = workspaceIdInput || defaultWorkspaceId;
         const channelId = channelIdInput || defaultChannelId;
+        const source = normalizeSource(options?.source);
+        const provider = options?.provider || (source === "wa-inbound" ? "whatsapp" : "instagram");
+        const graphIncomingMessage = buildGraphIncomingMessage(source, incomingMessage);
         const runtimeFlags = await getWorkspaceRuntimeFlags(workspaceId);
         if (!runtimeFlags.allowAgent) {
             return "Maaf, workspace Anda sedang tidak aktif untuk memproses pesan.";
@@ -91,27 +144,57 @@ export async function runAgent(
             return "Maaf, bot sedang tidak aktif. Silakan coba lagi nanti.";
         }
 
-        const inboundUsage = await billingService.consumeUsage({
-            workspaceId,
-            channelId,
-            metric: UsageMetric.INBOUND_MESSAGE,
-            quantity: 1,
-            referenceId: phoneNumber,
-            metadata: {
-                source: "wa-inbound",
-            },
-        });
+        const inboundUsageMetric = provider === "instagram"
+            ? UsageMetric.IG_INBOUND
+            : UsageMetric.INBOUND_MESSAGE;
+        const inboundUsage = options?.skipInboundBilling
+            ? {
+                allowed: true,
+                softLimitReached: false,
+                hardLimitReached: false,
+                used: 0,
+                projected: 0,
+                limit: Number.MAX_SAFE_INTEGER,
+                metric: inboundUsageMetric,
+            }
+            : await billingService.consumeUsage({
+                workspaceId,
+                channelId,
+                metric: inboundUsageMetric,
+                quantity: 1,
+                referenceId: phoneNumber,
+                metadata: {
+                    metric: inboundUsageMetric,
+                    source,
+                    provider,
+                    threadId: options?.threadId,
+                    commentId: options?.commentId,
+                    mediaId: options?.mediaId,
+                    eventId: options?.eventId,
+                },
+            });
 
         if (!inboundUsage.allowed) {
             return "Kuota pesan bulanan paket Anda sudah habis. Silakan upgrade plan untuk melanjutkan.";
         }
 
-        const user = await userRepo.upsertUser(phoneNumber, workspaceId, pushName);
+        const hasInstagramIdentity = Boolean(options?.externalUserId?.trim() || options?.username?.trim());
+        const user = provider === "instagram" && hasInstagramIdentity
+            ? await userRepo.upsertUserByChannelIdentity({
+                workspaceId,
+                provider: "instagram",
+                externalUserId: options?.externalUserId,
+                username: options?.username,
+                name: pushName,
+            })
+            : await userRepo.upsertUser(phoneNumber, workspaceId, pushName);
         if (user.isBlocked) {
             return "";
         }
 
-        await campaignService.recordInboundReply(workspaceId, phoneNumber, incomingMessage);
+        if (source === "wa-inbound") {
+            await campaignService.recordInboundReply(workspaceId, phoneNumber, incomingMessage);
+        }
 
         const intent = detectConversationIntent(incomingMessage);
         const intentSegments = deriveSegmentsFromIntent(intent.intent);
@@ -130,6 +213,18 @@ export async function runAgent(
                 intentConfidence: intent.confidence,
                 intentKeywords: intent.matchedKeywords,
                 autoSegments: intentSegments,
+                source,
+                eventType: source,
+                provider,
+                igUserId: options?.externalUserId,
+                igUsername: options?.username,
+                threadId: options?.threadId,
+                commentId: options?.commentId,
+                mediaId: options?.mediaId,
+                eventId: options?.eventId,
+                eventKey: options?.eventKey,
+                batchCount: options?.batchCount,
+                sourceEventIds: options?.sourceEventIds,
             },
         });
 
@@ -143,6 +238,14 @@ export async function runAgent(
                 message: incomingMessage,
                 intent: intent.intent,
                 intentConfidence: intent.confidence,
+                source,
+                provider,
+                igUserId: options?.externalUserId || null,
+                igUsername: options?.username || null,
+                threadId: options?.threadId || null,
+                commentId: options?.commentId || null,
+                mediaId: options?.mediaId || null,
+                eventId: options?.eventId || null,
             },
         }).catch((error) => {
             logError("agent.webhook_emit_failed.message_received", error, {
@@ -182,6 +285,10 @@ export async function runAgent(
                     keyword: handoverKeyword,
                     channelId,
                     intent: intent.intent,
+                    eventType: source,
+                    threadId: options?.threadId,
+                    commentId: options?.commentId,
+                    mediaId: options?.mediaId,
                 },
             });
 
@@ -249,7 +356,11 @@ export async function runAgent(
                 content: autoReply,
                 metadata: {
                     source: "business-hours-auto-reply",
+                    eventType: source,
                     channelId,
+                    threadId: options?.threadId,
+                    commentId: options?.commentId,
+                    mediaId: options?.mediaId,
                 },
             });
 
@@ -263,7 +374,7 @@ export async function runAgent(
             userId: user.id,
             channelId,
             phoneNumber,
-            incomingMessage,
+            incomingMessage: graphIncomingMessage,
             pushName,
             maxIterations: 5,
         }), {
@@ -279,6 +390,7 @@ export async function runAgent(
             channelId,
             latencyMs: aiLatencyMs,
             model: graphResult.metadata.model,
+            provider,
         });
         logInfo("agent.graph.completed", {
             component: "runner",
@@ -317,9 +429,26 @@ export async function runAgent(
             });
         }
 
-        const responseWithWarning = inboundUsage.softLimitReached
+        const responseWithWarning = inboundUsage.softLimitReached && source === "wa-inbound"
             ? `${response}\n\n[Info Billing] Pemakaian paket mendekati limit bulanan.`
             : response;
+
+        if (inboundUsage.softLimitReached && source !== "wa-inbound") {
+            logWarn("agent.billing.soft_limit_warning", {
+                component: "runner",
+                workspaceId,
+                channelId,
+                metric: inboundUsageMetric,
+                source,
+                provider,
+                threadId: options?.threadId,
+                commentId: options?.commentId,
+                mediaId: options?.mediaId,
+                used: inboundUsage.used,
+                projected: inboundUsage.projected,
+                limit: inboundUsage.limit,
+            });
+        }
 
         if (shouldPersistAssistantMessage(responseWithWarning)) {
             await messageRepo.saveMessage({
@@ -334,6 +463,18 @@ export async function runAgent(
                     totalTokens: graphResult.metadata.totalTokens,
                     softLimitWarning: inboundUsage.softLimitReached,
                     channelId,
+                    source,
+                    eventType: source,
+                    provider,
+                    igUserId: options?.externalUserId,
+                    igUsername: options?.username,
+                    threadId: options?.threadId,
+                    commentId: options?.commentId,
+                    mediaId: options?.mediaId,
+                    eventId: options?.eventId,
+                    eventKey: options?.eventKey,
+                    batchCount: options?.batchCount,
+                    sourceEventIds: options?.sourceEventIds,
                 },
             });
         } else {

@@ -4,18 +4,21 @@ import { configRepo } from "@/lib/db/configRepo";
 import { workspaceCredentialRepo } from "@/lib/db/workspaceCredentialRepo";
 import { workspacePromptRepo } from "@/lib/db/workspacePromptRepo";
 import { workspaceToolPolicyRepo } from "@/lib/db/workspaceToolPolicyRepo";
+import { getWorkspaceInstagramAutoReplyRules } from "@/lib/integrations/instagram/ruleConfig";
 import {
     activatePromptVersionAction,
     createPromptVersionAction,
     deleteWorkspaceCredentialAction,
     revokeAllAuthSessionsAction,
     revokeAuthSessionAction,
+    updateInstagramAutoReplyRulesAction,
     updateBotConfigAction,
     upsertWorkspaceCredentialAction,
     upsertWorkspaceToolPolicyAction,
 } from "../actions";
 import { authSessionRepo } from "@/lib/db/authSessionRepo";
 import { requireSessionPermission } from "@/lib/auth/sessionContext";
+import { InstagramRuleSandbox } from "./InstagramRuleSandbox";
 
 const KNOWN_TOOLS = [
     "get_user_info",
@@ -68,12 +71,13 @@ function Field({
 
 export default async function ConfigPage() {
     const { workspaceId, userId } = await requireSessionPermission("manage_channel");
-    const [botConfig, sessions, promptVersions, credentials, toolPolicies] = await Promise.all([
+    const [botConfig, sessions, promptVersions, credentials, toolPolicies, instagramRules] = await Promise.all([
         configRepo.getBotConfig(workspaceId),
         authSessionRepo.listActiveSessions(userId),
         workspacePromptRepo.listPromptVersions(workspaceId, 50),
         workspaceCredentialRepo.listCredentialMetas(workspaceId),
         workspaceToolPolicyRepo.listPolicies(workspaceId),
+        getWorkspaceInstagramAutoReplyRules(workspaceId),
     ]);
 
     const activePrompt = promptVersions.find((item) => item.isActive) || null;
@@ -273,6 +277,134 @@ export default async function ConfigPage() {
                     </button>
                 </form>
             </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4">
+                <h2 className="text-base font-semibold text-slate-900">Instagram Auto-Reply Rules</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                    Atur rule auto-reply untuk Instagram comment dan DM per workspace.
+                </p>
+
+                <form action={updateInstagramAutoReplyRulesAction} className="mt-4 space-y-4">
+                    <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="space-y-3 rounded-md border border-slate-200 p-3">
+                            <p className="text-sm font-semibold text-slate-800">Comment Rules</p>
+
+                            <Field label="Comment Auto Reply">
+                                <select
+                                    name="commentEnabled"
+                                    defaultValue={instagramRules.comment.enabled ? "true" : "false"}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                >
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </Field>
+
+                            <Field label="Keyword Mode">
+                                <select
+                                    name="commentKeywordMode"
+                                    defaultValue={instagramRules.comment.keywordMode}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                >
+                                    <option value="all">Reply Semua Comment</option>
+                                    <option value="keywords">Hanya Jika Keyword Match</option>
+                                </select>
+                            </Field>
+
+                            <Field label="Keywords" hint="Pisahkan dengan koma jika mode keyword aktif">
+                                <input
+                                    name="commentKeywords"
+                                    defaultValue={instagramRules.comment.keywords.join(", ")}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                    placeholder="harga, promo, stok"
+                                />
+                            </Field>
+
+                            <Field label="Sentiment Threshold" hint="-1.0 sampai 1.0">
+                                <input
+                                    type="number"
+                                    min={-1}
+                                    max={1}
+                                    step="0.1"
+                                    name="commentSentimentThreshold"
+                                    defaultValue={instagramRules.comment.sentimentThreshold}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                />
+                            </Field>
+                        </div>
+
+                        <div className="space-y-3 rounded-md border border-slate-200 p-3">
+                            <p className="text-sm font-semibold text-slate-800">DM Rules</p>
+
+                            <Field label="DM Auto Reply">
+                                <select
+                                    name="dmEnabled"
+                                    defaultValue={instagramRules.dm.enabled ? "true" : "false"}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                >
+                                    <option value="true">Enabled</option>
+                                    <option value="false">Disabled</option>
+                                </select>
+                            </Field>
+
+                            <Field label="Keyword Mode">
+                                <select
+                                    name="dmKeywordMode"
+                                    defaultValue={instagramRules.dm.keywordMode}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                >
+                                    <option value="all">Reply Semua DM</option>
+                                    <option value="keywords">Hanya Jika Keyword Match</option>
+                                </select>
+                            </Field>
+
+                            <Field label="Keywords" hint="Pisahkan dengan koma jika mode keyword aktif">
+                                <input
+                                    name="dmKeywords"
+                                    defaultValue={instagramRules.dm.keywords.join(", ")}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                    placeholder="harga, promo, katalog"
+                                />
+                            </Field>
+
+                            <Field label="Business Hours Only">
+                                <select
+                                    name="dmBusinessHoursOnly"
+                                    defaultValue={instagramRules.dm.businessHoursOnly ? "true" : "false"}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                >
+                                    <option value="false">No</option>
+                                    <option value="true">Yes</option>
+                                </select>
+                            </Field>
+
+                            <Field label="Fallback Message" hint="Dipakai saat DM masuk di luar jam kerja (jika rule aktif)">
+                                <input
+                                    name="dmFallbackMessage"
+                                    defaultValue={instagramRules.dm.fallbackMessage}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                    placeholder="Terima kasih, kami akan balas di jam operasional."
+                                />
+                            </Field>
+
+                            <Field label="Escalation Policy" hint="Contoh: none, create_handover, notify_operator">
+                                <input
+                                    name="dmEscalationPolicy"
+                                    defaultValue={instagramRules.dm.escalationPolicy}
+                                    className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                                    placeholder="none"
+                                />
+                            </Field>
+                        </div>
+                    </div>
+
+                    <button type="submit" className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white">
+                        Save Instagram Rules
+                    </button>
+                </form>
+            </div>
+
+            <InstagramRuleSandbox />
 
             <div className="rounded-lg border border-slate-200 bg-white p-4">
                 <h2 className="text-base font-semibold text-slate-900">Prompt Versioning (Database)</h2>

@@ -3,6 +3,7 @@ import { getToken } from "next-auth/jwt";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { authSessionRepo } from "@/lib/db/authSessionRepo";
 import { authUserRepo } from "@/lib/db/authUserRepo";
+import { assertTrustedRouteOrigin } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
 
@@ -30,6 +31,12 @@ export async function GET() {
 }
 
 export async function DELETE(request: NextRequest) {
+    try {
+        assertTrustedRouteOrigin(request);
+    } catch {
+        return NextResponse.json({ success: false, message: "Invalid request origin" }, { status: 403 });
+    }
+
     const auth = await requireApiSession("read");
     if (!auth.ok) {
         return auth.response;

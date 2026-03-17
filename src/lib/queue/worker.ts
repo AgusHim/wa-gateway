@@ -1,6 +1,6 @@
-import os from "os";
-import { Job, Queue, Worker } from "bullmq";
+import { Job, Worker } from "bullmq";
 import { redis } from "./client";
+import { resolveWorkerConcurrencyConfig, startQueueAutoscaler } from "./autoscaler";
 import {
     DeadLetterJob,
     InboundMessageJob,
@@ -12,79 +12,28 @@ import {
     getOutboundQueueName,
 } from "./messageQueue";
 import { withObservationContext } from "@/lib/observability/context";
-import { logError, logInfo, logWarn } from "@/lib/observability/logger";
+import { logError, logInfo } from "@/lib/observability/logger";
 import { recordDeliveryResult, recordQueueLag, recordWorkerThroughput } from "@/lib/observability/metrics";
 
 let worker: Worker<InboundMessageJob> | null = null;
 const inboundWorkers = new Map<string, Worker<InboundMessageJob>>();
 const outboundWorkers = new Map<string, Worker<OutboundSendJob>>();
-const autoscalerByQueue = new Map<string, NodeJS.Timeout>();
-
-function parseIntEnv(name: string, fallback: number): number {
-    const parsed = Number(process.env[name]);
-    if (!Number.isFinite(parsed)) {
-        return fallback;
-    }
-    return Math.max(1, Math.round(parsed));
-}
-
-function resolveCpuCount(): number {
-    const available = typeof os.availableParallelism === "function" ? os.availableParallelism() : 0;
-    if (available > 0) {
-        return available;
-    }
-    return Math.max(1, os.cpus().length || 1);
-}
 
 function resolveInboundConcurrency() {
-    const cpuBasedMax = Math.max(1, Math.min(16, resolveCpuCount()));
-    const min = parseIntEnv("INBOUND_WORKER_MIN_CONCURRENCY", 1);
-    const max = parseIntEnv("INBOUND_WORKER_MAX_CONCURRENCY", cpuBasedMax);
-    const initial = parseIntEnv("INBOUND_WORKER_CONCURRENCY", Math.min(max, Math.max(min, 2)));
-
-    return {
-        min: Math.max(1, Math.min(min, max)),
-        max: Math.max(1, Math.max(min, max)),
-        initial: Math.max(1, Math.min(initial, Math.max(min, max))),
-    };
+    return resolveWorkerConcurrencyConfig({
+        envPrefix: "INBOUND_WORKER",
+        defaultInitial: 2,
+        defaultMaxCap: 16,
+    });
 }
 
-function startAutoscalerForQueue(queueName: string, workerRef: Worker<InboundMessageJob>) {
-    if (autoscalerByQueue.has(queueName)) {
-        return;
-    }
-
-    const { min, max } = resolveInboundConcurrency();
-    const intervalMs = parseIntEnv("WORKER_AUTOSCALE_INTERVAL_MS", 5000);
-    const targetPerWorker = parseIntEnv("WORKER_AUTOSCALE_TARGET_BACKLOG", 20);
-    const queue = new Queue<InboundMessageJob>(queueName, { connection: redis });
-
-    const timer = setInterval(async () => {
-        try {
-            const counts = await queue.getJobCounts("wait", "active", "delayed");
-            const backlog = (counts.wait || 0) + (counts.active || 0) + (counts.delayed || 0);
-            const target = Math.max(min, Math.min(max, Math.ceil(backlog / Math.max(1, targetPerWorker))));
-
-            if (workerRef.concurrency !== target) {
-                const previous = workerRef.concurrency;
-                workerRef.concurrency = target;
-                logInfo("queue.worker.autoscaled", {
-                    queueName,
-                    previousConcurrency: previous,
-                    nextConcurrency: target,
-                    backlog,
-                });
-            }
-        } catch (error) {
-            logWarn("queue.worker.autoscaler.failed", {
-                queueName,
-                reason: error instanceof Error ? error.message : String(error),
-            });
-        }
-    }, Math.max(1000, intervalMs));
-
-    timer.unref?.();
-    autoscalerByQueue.set(queueName, timer);
+function resolveOutboundConcurrency() {
+    return resolveWorkerConcurrencyConfig({
+        envPrefix: "OUTBOUND_WORKER",
+        defaultInitial: 1,
+        defaultMaxCap: 16,
+        defaultTargetBacklog: 10,
+    });
 }
 
 function isFinalFailure(job: Job<InboundMessageJob> | Job<OutboundSendJob>): boolean {
@@ -242,13 +191,20 @@ export function startWorker(
         });
     });
 
-    startAutoscalerForQueue("whatsapp-inbound", worker);
+    startQueueAutoscaler({
+        workerType: "whatsapp-inbound",
+        queueName: "whatsapp-inbound",
+        workerRef: worker,
+        config: inbound,
+    });
 
     logInfo("queue.worker.started", {
         queueName: "whatsapp-inbound",
         concurrency: inbound.initial,
         minConcurrency: inbound.min,
         maxConcurrency: inbound.max,
+        autoscaleIntervalMs: inbound.intervalMs,
+        autoscaleTargetBacklog: inbound.targetBacklog,
     });
     return worker;
 }
@@ -353,13 +309,20 @@ export function startInboundWorkerForPartition(
     });
 
     inboundWorkers.set(queueName, inboundWorker);
-    startAutoscalerForQueue(queueName, inboundWorker);
+    startQueueAutoscaler({
+        workerType: "whatsapp-inbound",
+        queueName,
+        workerRef: inboundWorker,
+        config: inbound,
+    });
 
     logInfo("queue.worker.started", {
         queueName,
         concurrency: inbound.initial,
         minConcurrency: inbound.min,
         maxConcurrency: inbound.max,
+        autoscaleIntervalMs: inbound.intervalMs,
+        autoscaleTargetBacklog: inbound.targetBacklog,
     });
 
     return inboundWorker;
@@ -402,7 +365,7 @@ function startOutboundWorkerByName(
         return existing;
     }
 
-    const outboundConcurrency = parseIntEnv("OUTBOUND_WORKER_CONCURRENCY", 1);
+    const outbound = resolveOutboundConcurrency();
 
     const outboundWorker = new Worker<OutboundSendJob>(
         queueName,
@@ -435,7 +398,7 @@ function startOutboundWorkerByName(
         }),
         {
             connection: redis,
-            concurrency: Math.max(1, outboundConcurrency),
+            concurrency: outbound.initial,
         }
     );
 
@@ -472,6 +435,7 @@ function startOutboundWorkerByName(
                 workspaceId: job.data.workspaceId,
                 channelId: job.data.channelId,
                 success: false,
+                provider: "whatsapp",
             });
 
             try {
@@ -497,9 +461,19 @@ function startOutboundWorkerByName(
     });
 
     outboundWorkers.set(queueName, outboundWorker);
+    startQueueAutoscaler({
+        workerType: "whatsapp-outbound",
+        queueName,
+        workerRef: outboundWorker,
+        config: outbound,
+    });
     logInfo("queue.worker.started", {
         queueName,
-        concurrency: Math.max(1, outboundConcurrency),
+        concurrency: outbound.initial,
+        minConcurrency: outbound.min,
+        maxConcurrency: outbound.max,
+        autoscaleIntervalMs: outbound.intervalMs,
+        autoscaleTargetBacklog: outbound.targetBacklog,
     });
     return outboundWorker;
 }

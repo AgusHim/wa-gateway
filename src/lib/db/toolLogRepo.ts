@@ -1,7 +1,8 @@
 import { prisma } from "./client";
 import { Prisma } from "@prisma/client";
 import { assertTenantScope } from "@/lib/tenant/context";
-import { redactPii } from "@/lib/security/pii";
+import { maybeRedactPii } from "@/lib/security/pii";
+import { configRepo } from "./configRepo";
 
 export const toolLogRepo = {
     async saveToolLog(data: {
@@ -13,8 +14,10 @@ export const toolLogRepo = {
         duration: number;
     }) {
         const resolvedWorkspaceId = assertTenantScope(data.workspaceId);
-        const sanitizedInput = redactPii(data.input);
-        const sanitizedOutput = data.output ? redactPii(data.output) : undefined;
+        const config = await configRepo.getBotConfig(resolvedWorkspaceId);
+        const piiRedactionEnabled = config.piiRedactionEnabled !== false;
+        const sanitizedInput = maybeRedactPii(data.input, piiRedactionEnabled);
+        const sanitizedOutput = data.output ? maybeRedactPii(data.output, piiRedactionEnabled) : undefined;
         return prisma.toolLog.create({
             data: {
                 ...data,

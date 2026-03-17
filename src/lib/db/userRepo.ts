@@ -10,6 +10,7 @@ export type DashboardUserFilters = {
     dateFrom?: Date;
     dateTo?: Date;
     channelId?: string;
+    source?: string;
 };
 
 const userDetailInclude = Prisma.validator<Prisma.ChatUserInclude>()({
@@ -55,6 +56,7 @@ function buildUserWhere(workspaceId: string, filters: DashboardUserFilters): Pri
     }
 
     const conversationWhere: Prisma.MessageWhereInput = {};
+    const andClauses: Prisma.MessageWhereInput[] = [];
     if (filters.dateFrom || filters.dateTo) {
         const createdAt: Prisma.DateTimeFilter = {};
         if (filters.dateFrom) {
@@ -72,6 +74,44 @@ function buildUserWhere(workspaceId: string, filters: DashboardUserFilters): Pri
             path: ["channelId"],
             equals: filters.channelId.trim(),
         };
+    }
+
+    const source = filters.source?.trim().toLowerCase();
+    if (source === "instagram-dm" || source === "instagram-comment") {
+        andClauses.push({
+            metadata: {
+                path: ["eventType"],
+                equals: source,
+            },
+        });
+    } else if (source === "instagram") {
+        andClauses.push({
+            OR: [
+                {
+                    metadata: {
+                        path: ["provider"],
+                        equals: "instagram",
+                    },
+                },
+                {
+                    metadata: {
+                        path: ["source"],
+                        equals: "instagram",
+                    },
+                },
+            ],
+        });
+    } else if (source === "whatsapp") {
+        andClauses.push({
+            metadata: {
+                path: ["provider"],
+                equals: "whatsapp",
+            },
+        });
+    }
+
+    if (andClauses.length > 0) {
+        conversationWhere.AND = andClauses;
     }
 
     if (Object.keys(conversationWhere).length > 0) {

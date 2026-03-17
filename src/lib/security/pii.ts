@@ -44,3 +44,7 @@ export function redactPii<T>(value: T): T {
 
     return value;
 }
+
+export function maybeRedactPii<T>(value: T, enabled: boolean): T {
+    return enabled ? redactPii(value) : value;
+}

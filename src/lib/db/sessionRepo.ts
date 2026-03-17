@@ -1,15 +1,28 @@
 import { prisma } from "./client";
+import { decryptStoredSessionData, encryptStoredSessionData } from "@/lib/security/sessionCipher";
+
+function mapSessionData<T extends { data: string } | null>(session: T): T {
+    if (!session) {
+        return session;
+    }
+
+    return {
+        ...session,
+        data: decryptStoredSessionData(session.data),
+    };
+}
 
 export const sessionRepo = {
     async getSession(id: string) {
-        return prisma.session.findUnique({ where: { id } });
+        const session = await prisma.session.findUnique({ where: { id } });
+        return mapSessionData(session);
     },
 
     async saveSession(id: string, data: string) {
         return prisma.session.upsert({
             where: { id },
-            update: { data },
-            create: { id, data },
+            update: { data: encryptStoredSessionData(data) },
+            create: { id, data: encryptStoredSessionData(data) },
         });
     },
 
@@ -18,7 +31,7 @@ export const sessionRepo = {
     },
 
     async listSessionsByPrefix(prefix: string) {
-        return prisma.session.findMany({
+        const sessions = await prisma.session.findMany({
             where: {
                 id: {
                     startsWith: prefix,
@@ -29,5 +42,6 @@ export const sessionRepo = {
                 data: true,
             },
         });
+        return sessions.map((session) => mapSessionData(session));
     },
 };

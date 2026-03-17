@@ -27,3 +27,6 @@ export function isWhatsAppProvider(value: unknown): boolean {
     return normalizeChannelProvider(value) === "whatsapp";
 }
 
+export function isInstagramProvider(value: unknown): boolean {
+    return normalizeChannelProvider(value) === "instagram";
+}

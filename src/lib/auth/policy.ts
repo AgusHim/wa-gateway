@@ -49,6 +49,7 @@ export const ROUTE_PERMISSION_MATRIX: Array<{ prefix: string; permission: Tenant
     { prefix: "/knowledge", permission: "read" },
     { prefix: "/conversations", permission: "read" },
     { prefix: "/monitor", permission: "read" },
+    { prefix: "/observability", permission: "read" },
     { prefix: "/tool-logs", permission: "read" },
     { prefix: "/analytics", permission: "read" },
     { prefix: "/onboarding", permission: "read" },

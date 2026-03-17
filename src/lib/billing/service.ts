@@ -89,6 +89,9 @@ type BillingSnapshot = {
     usage: {
         month: string;
         messages: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
+        instagramInbound: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
+        instagramOutbound: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
+        instagramCommentReplies: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
         aiTokens: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
         toolCalls: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
         channels: { used: number; limit: number; softLimitReached: boolean; hardLimitReached: boolean };
@@ -461,12 +464,27 @@ function getMetricLimit(subscriptionPlan: {
     return subscriptionPlan.messageLimit;
 }
 
+function getTotalMessageUsage(usage: Map<UsageMetric, number>): number {
+    return (usage.get(UsageMetric.INBOUND_MESSAGE) ?? 0)
+        + (usage.get(UsageMetric.OUTBOUND_MESSAGE) ?? 0)
+        + (usage.get(UsageMetric.MEDIA_IN) ?? 0)
+        + (usage.get(UsageMetric.MEDIA_OUT) ?? 0)
+        + (usage.get(UsageMetric.IG_INBOUND) ?? 0)
+        + (usage.get(UsageMetric.IG_OUTBOUND) ?? 0)
+        + (usage.get(UsageMetric.IG_COMMENT_REPLY) ?? 0);
+}
+
 function getUsageForMetric(usage: Map<UsageMetric, number>, metric: UsageMetric): number {
-    if (metric === UsageMetric.INBOUND_MESSAGE || metric === UsageMetric.OUTBOUND_MESSAGE || metric === UsageMetric.MEDIA_IN || metric === UsageMetric.MEDIA_OUT) {
-        return (usage.get(UsageMetric.INBOUND_MESSAGE) ?? 0)
-            + (usage.get(UsageMetric.OUTBOUND_MESSAGE) ?? 0)
-            + (usage.get(UsageMetric.MEDIA_IN) ?? 0)
-            + (usage.get(UsageMetric.MEDIA_OUT) ?? 0);
+    if (
+        metric === UsageMetric.INBOUND_MESSAGE
+        || metric === UsageMetric.OUTBOUND_MESSAGE
+        || metric === UsageMetric.MEDIA_IN
+        || metric === UsageMetric.MEDIA_OUT
+        || metric === UsageMetric.IG_INBOUND
+        || metric === UsageMetric.IG_OUTBOUND
+        || metric === UsageMetric.IG_COMMENT_REPLY
+    ) {
+        return getTotalMessageUsage(usage);
     }
 
     return usage.get(metric) ?? 0;
@@ -723,7 +741,10 @@ async function getBillingSnapshot(workspaceId: string): Promise<BillingSnapshot>
         }),
     ]);
 
-    const totalMessagesUsed = getUsageForMetric(usageMap, UsageMetric.INBOUND_MESSAGE);
+    const totalMessagesUsed = getTotalMessageUsage(usageMap);
+    const instagramInboundUsed = usageMap.get(UsageMetric.IG_INBOUND) ?? 0;
+    const instagramOutboundUsed = usageMap.get(UsageMetric.IG_OUTBOUND) ?? 0;
+    const instagramCommentRepliesUsed = usageMap.get(UsageMetric.IG_COMMENT_REPLY) ?? 0;
     const aiTokensUsed = usageMap.get(UsageMetric.AI_TOKEN) ?? 0;
     const toolCallsUsed = usageMap.get(UsageMetric.TOOL_CALL) ?? 0;
 
@@ -781,6 +802,24 @@ async function getBillingSnapshot(workspaceId: string): Promise<BillingSnapshot>
                 limit: subscription.plan.messageLimit,
                 softLimitReached: totalMessagesUsed >= messageThreshold,
                 hardLimitReached: totalMessagesUsed > subscription.plan.messageLimit,
+            },
+            instagramInbound: {
+                used: instagramInboundUsed,
+                limit: subscription.plan.messageLimit,
+                softLimitReached: instagramInboundUsed >= messageThreshold,
+                hardLimitReached: instagramInboundUsed > subscription.plan.messageLimit,
+            },
+            instagramOutbound: {
+                used: instagramOutboundUsed,
+                limit: subscription.plan.messageLimit,
+                softLimitReached: instagramOutboundUsed >= messageThreshold,
+                hardLimitReached: instagramOutboundUsed > subscription.plan.messageLimit,
+            },
+            instagramCommentReplies: {
+                used: instagramCommentRepliesUsed,
+                limit: subscription.plan.messageLimit,
+                softLimitReached: instagramCommentRepliesUsed >= messageThreshold,
+                hardLimitReached: instagramCommentRepliesUsed > subscription.plan.messageLimit,
             },
             aiTokens: {
                 used: aiTokensUsed,

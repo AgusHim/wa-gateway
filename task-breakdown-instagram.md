@@ -33,156 +33,156 @@
 ## Domain 2 - Meta App, Auth OAuth, dan Credential Lifecycle
 
 ### 2.1 Meta Developer App Setup
-- [ ] Buat app di Meta Developer dan aktifkan produk Instagram Graph / Messaging sesuai use case.
-- [ ] Konfigurasi app mode (development/live), app domains, privacy policy URL, terms URL.
-- [ ] Tentukan environment config per stage (dev/staging/prod) untuk App ID/Secret.
+- [~] Buat app di Meta Developer dan aktifkan produk Instagram Graph / Messaging sesuai use case.
+- [~] Konfigurasi app mode (development/live), app domains, privacy policy URL, terms URL.
+- [x] Tentukan environment config per stage (dev/staging/prod) untuk App ID/Secret.
 
 ### 2.2 OAuth Connection Flow
-- [ ] Implement OAuth connect dari dashboard: authorize -> callback -> token exchange.
-- [ ] Simpan credential terenkripsi (`accessToken`, `tokenType`, `expiresAt`, `scopes`, `appScopedUserId`).
-- [ ] Simpan binding `workspaceId -> channelId -> instagramAccountId -> pageId -> igUserId`.
+- [x] Implement OAuth connect dari dashboard: authorize -> callback -> token exchange.
+- [x] Simpan credential terenkripsi (`accessToken`, `tokenType`, `expiresAt`, `scopes`, `appScopedUserId`).
+- [x] Simpan binding `workspaceId -> channelId -> instagramAccountId -> pageId -> igUserId`.
 
 ### 2.3 Token Refresh & Health
-- [ ] Job scheduler untuk refresh token sebelum expiry + fallback retry/backoff.
-- [ ] Tandai channel degraded jika token invalid/expired/revoked.
-- [ ] Tambahkan endpoint/manual action untuk reconnect akun Instagram.
+- [x] Job scheduler untuk refresh token sebelum expiry + fallback retry/backoff.
+- [x] Tandai channel degraded jika token invalid/expired/revoked.
+- [x] Tambahkan endpoint/manual action untuk reconnect akun Instagram.
 
 ---
 
 ## Domain 3 - Data Model & Repository Layer
 
 ### 3.1 Prisma Schema
-- [ ] Tambah enum/type channel untuk Instagram di model channel yang ada.
-- [ ] Tambah tabel konfigurasi Instagram channel (ig user, page, webhook metadata, token refs).
-- [ ] Tambah metadata standar message untuk sumber IG: `source`, `eventType`, `commentId`, `mediaId`, `threadId`.
+- [x] Tambah enum/type channel untuk Instagram di model channel yang ada.
+- [x] Tambah tabel konfigurasi Instagram channel (ig user, page, webhook metadata, token refs).
+- [x] Tambah metadata standar message untuk sumber IG: `source`, `eventType`, `commentId`, `mediaId`, `threadId`.
 
 ### 3.2 Repository & Guardrails
-- [ ] Tambah repository `instagramChannelRepo` + strict `workspaceId` scope.
-- [ ] Tambah helper query conversation berdasarkan `igUserId/threadId`.
-- [ ] Tambah migration + seed compatibility untuk tenant existing.
+- [x] Tambah repository `instagramChannelRepo` + strict `workspaceId` scope.
+- [x] Tambah helper query conversation berdasarkan `igUserId/threadId`.
+- [x] Tambah migration + seed compatibility untuk tenant existing.
 
 ---
 
 ## Domain 4 - Webhook Ingestion (DM & Comment)
 
 ### 4.1 Webhook Endpoint
-- [ ] Implement `GET` verification challenge (`hub.mode`, `hub.verify_token`, `hub.challenge`).
-- [ ] Implement `POST` webhook receiver untuk object/event Instagram.
-- [ ] Verifikasi signature request (`X-Hub-Signature-256`) untuk keamanan payload.
+- [x] Implement `GET` verification challenge (`hub.mode`, `hub.verify_token`, `hub.challenge`).
+- [x] Implement `POST` webhook receiver untuk object/event Instagram.
+- [x] Verifikasi signature request (`X-Hub-Signature-256`) untuk keamanan payload.
 
 ### 4.2 Event Normalization
-- [ ] Normalisasi event DM masuk menjadi shape inbound internal (setara WA inbound job).
-- [ ] Normalisasi event komentar baru/mention ke format event internal.
-- [ ] Filter idempotency dengan event key unik (delivery-safe, no duplicate process).
+- [x] Normalisasi event DM masuk menjadi shape inbound internal (setara WA inbound job).
+- [x] Normalisasi event komentar baru/mention ke format event internal.
+- [x] Filter idempotency dengan event key unik (delivery-safe, no duplicate process).
 
 ### 4.3 Reliability
-- [ ] Ack webhook cepat (< 2s), lalu lanjut proses async via queue.
-- [ ] Dead-letter queue untuk event gagal permanen.
-- [ ] Replay tool internal untuk event webhook IG.
+- [x] Ack webhook cepat (< 2s), lalu lanjut proses async via queue.
+- [x] Dead-letter queue untuk event gagal permanen.
+- [x] Replay tool internal untuk event webhook IG.
 
 ---
 
 ## Domain 5 - Queue, Worker, dan Orchestration Agent
 
 ### 5.1 Inbound Queue Integration
-- [ ] Tambah queue partition Instagram per `workspaceId + channelId`.
-- [ ] Reuse pola debounce/batching inbound untuk DM burst.
-- [ ] Prioritization rules: DM > komentar (opsional, configurable).
+- [x] Tambah queue partition Instagram per `workspaceId + channelId`.
+- [x] Reuse pola debounce/batching inbound untuk DM burst.
+- [x] Prioritization rules: DM > komentar (opsional, configurable).
 
 ### 5.2 Runner Adaptation
-- [ ] Extend `runAgent` context agar mengenali source `instagram-dm` dan `instagram-comment`.
-- [ ] Simpan inbound event sebagai `Message` + metadata lengkap channel/event.
-- [ ] Buat template context prompt untuk komentar vs DM (tone + limits berbeda).
+- [x] Extend `runAgent` context agar mengenali source `instagram-dm` dan `instagram-comment`.
+- [x] Simpan inbound event sebagai `Message` + metadata lengkap channel/event.
+- [x] Buat template context prompt untuk komentar vs DM (tone + limits berbeda).
 
 ### 5.3 Human Handover Guard
-- [ ] Terapkan guard: jika operator sudah membalas thread, AI auto-reply dihentikan.
-- [ ] Sinkronkan status handover lintas inbox dashboard.
-- [ ] Tambah audit log untuk setiap skip karena human override.
+- [x] Terapkan guard: jika operator sudah membalas thread, AI auto-reply dihentikan.
+- [x] Sinkronkan status handover lintas inbox dashboard.
+- [x] Tambah audit log untuk setiap skip karena human override.
 
 ---
 
 ## Domain 6 - Outbound Reply API (Send DM & Reply Comment)
 
 ### 6.1 Meta Client SDK Layer
-- [ ] Buat `instagramClient` internal untuk endpoint kirim DM dan reply komentar.
-- [ ] Tambah retry policy + circuit breaker + klasifikasi error (4xx vs 5xx).
-- [ ] Tambah support `appsecret_proof` jika diaktifkan pada app security.
+- [x] Buat `instagramClient` internal untuk endpoint kirim DM dan reply komentar.
+- [x] Tambah retry policy + circuit breaker + klasifikasi error (4xx vs 5xx).
+- [x] Tambah support `appsecret_proof` jika diaktifkan pada app security.
 
 ### 6.2 Policy & Compliance
-- [ ] Enforce messaging policy window/limits sesuai aturan Meta untuk DM.
-- [ ] Rate limit per channel + per tenant untuk anti-spam.
-- [ ] Fallback policy saat API reject (queue retry, mark failed, notify operator).
+- [x] Enforce messaging policy window/limits sesuai aturan Meta untuk DM.
+- [x] Rate limit per channel + per tenant untuk anti-spam.
+- [x] Fallback policy saat API reject (queue retry, mark failed, notify operator).
 
 ### 6.3 Delivery Tracking
-- [ ] Simpan delivery result dan external message/comment reply ID.
-- [ ] Webhook event out (sent/failed) untuk integrasi eksternal.
-- [ ] Dashboard metrics: success rate, fail reason top list.
+- [x] Simpan delivery result dan external message/comment reply ID.
+- [x] Webhook event out (sent/failed) untuk integrasi eksternal.
+- [x] Dashboard metrics: success rate, fail reason top list.
 
 ---
 
 ## Domain 7 - CRM Inbox & Dashboard UX
 
 ### 7.1 Channel Management UI
-- [ ] Tambah halaman connect/disconnect Instagram channel.
-- [ ] Tampilkan status token, scope permissions, last webhook ping.
-- [ ] Tampilkan audit timeline connect/reconnect/error.
+- [x] Tambah halaman connect/disconnect Instagram channel.
+- [x] Tampilkan status token, scope permissions, last webhook ping.
+- [x] Tampilkan audit timeline connect/reconnect/error.
 
 ### 7.2 Conversation Inbox
-- [ ] Tambah filter source channel (`WhatsApp`, `Instagram DM`, `Instagram Comment`).
-- [ ] Thread view komentar + DM dengan metadata asal konten.
-- [ ] Tombol takeover operator + toggle auto-reply per thread.
+- [x] Tambah filter source channel (`WhatsApp`, `Instagram DM`, `Instagram Comment`).
+- [x] Thread view komentar + DM dengan metadata asal konten.
+- [x] Tombol takeover operator + toggle auto-reply per thread.
 
 ### 7.3 Config Panel
-- [ ] Rule config auto-reply komentar (keyword/intent/sentiment threshold).
-- [ ] Rule config auto-reply DM (business hours, fallback, escalation policy).
-- [ ] Preview & test sandbox untuk simulasi event IG.
+- [x] Rule config auto-reply komentar (keyword/intent/sentiment threshold).
+- [x] Rule config auto-reply DM (business hours, fallback, escalation policy).
+- [x] Preview & test sandbox untuk simulasi event IG.
 
 ---
 
 ## Domain 8 - Observability, Analytics, dan Billing
 
 ### 8.1 Observability
-- [ ] Tambah metric IG: webhook ingest rate, queue lag, ai latency, outbound success.
-- [ ] Correlation ID end-to-end: webhook -> queue -> runner -> outbound API.
-- [ ] Structured logging dengan dimensi `workspaceId/channelId/igUserId/threadId`.
+- [x] Tambah metric IG: webhook ingest rate, queue lag, ai latency, outbound success.
+- [x] Correlation ID end-to-end: webhook -> queue -> runner -> outbound API.
+- [x] Structured logging dengan dimensi `workspaceId/channelId/igUserId/threadId`.
 
 ### 8.2 Analytics
-- [ ] Dashboard ringkas: jumlah DM/comment, response time, auto vs human ratio.
-- [ ] Campaign/content insight dasar: post/comment volume yang ditangani bot.
-- [ ] Export CSV untuk percakapan IG per rentang tanggal.
+- [x] Dashboard ringkas: jumlah DM/comment, response time, auto vs human ratio.
+- [x] Campaign/content insight dasar: post/comment volume yang ditangani bot.
+- [x] Export CSV untuk percakapan IG per rentang tanggal.
 
 ### 8.3 Billing Metering
-- [ ] Definisikan usage metric baru jika diperlukan (`IG_INBOUND`, `IG_OUTBOUND`, `IG_COMMENT_REPLY`).
-- [ ] Integrasi usage ke plan limits existing.
-- [ ] Soft-limit warning + hard-limit block untuk Instagram traffic.
+- [x] Definisikan usage metric baru jika diperlukan (`IG_INBOUND`, `IG_OUTBOUND`, `IG_COMMENT_REPLY`).
+- [x] Integrasi usage ke plan limits existing.
+- [x] Soft-limit warning + hard-limit block untuk Instagram traffic.
 
 ---
 
 ## Domain 9 - Security, Privacy, dan Governance
 
 ### 9.1 Credential & Secret Security
-- [ ] Semua credential Meta disimpan encrypted-at-rest.
-- [ ] Secret rotation SOP untuk App Secret dan webhook verify token.
-- [ ] Principle of least privilege: minta scope minimum yang benar-benar dipakai.
+- [x] Semua credential Meta disimpan encrypted-at-rest.
+- [x] Secret rotation SOP untuk App Secret dan webhook verify token.
+- [x] Principle of least privilege: minta scope minimum yang benar-benar dipakai.
 
 ### 9.2 Data Privacy
-- [ ] Definisikan data retention untuk DM/comment event dan media metadata.
-- [ ] Sediakan data deletion workflow per user bila diminta.
-- [ ] Redaksi PII untuk log/tool output sesuai policy workspace.
+- [x] Definisikan data retention untuk DM/comment event dan media metadata.
+- [x] Sediakan data deletion workflow per user bila diminta.
+- [x] Redaksi PII untuk log/tool output sesuai policy workspace.
 
 ### 9.3 Auditability
-- [ ] Audit log untuk connect/disconnect channel, refresh token, policy changes.
-- [ ] Simpan trace untuk pesan yang di-skip karena handover/human override.
-- [ ] Tambah endpoint internal untuk investigasi incident channel Instagram.
+- [x] Audit log untuk connect/disconnect channel, refresh token, policy changes.
+- [x] Simpan trace untuk pesan yang di-skip karena handover/human override.
+- [x] Tambah endpoint internal untuk investigasi incident channel Instagram.
 
 ---
 
 ## Domain 10 - Testing, Sandbox, dan Quality Gate
 
 ### 10.1 Test Strategy
-- [ ] Unit test: payload parser webhook, signature verification, repo scoping.
-- [ ] Integration test: webhook DM/comment -> queue -> runner -> outbound mock.
-- [ ] Contract test untuk Meta API client (request/response mapping).
+- [x] Unit test: payload parser webhook, signature verification, repo scoping.
+- [x] Integration test: webhook DM/comment -> queue -> runner -> outbound mock.
+- [x] Contract test untuk Meta API client (request/response mapping).
 
 ### 10.2 Staging Validation
 - [ ] Siapkan akun IG test + page test untuk staging.
@@ -190,8 +190,8 @@
 - [ ] Uji failure mode: token expired, permission missing, rate limit hit.
 
 ### 10.3 Quality Gate
-- [ ] Checklist release: lint/type/test pass, no tenant data leak, no duplicate reply.
-- [ ] Uji load basic untuk burst inbound event.
+- [x] Checklist release: lint/type/test pass, no tenant data leak, no duplicate reply.
+- [x] Uji load basic untuk burst inbound event.
 - [ ] Sign-off operasional sebelum go-live tenant pertama.
 
 ---
@@ -199,27 +199,31 @@
 ## Domain 11 - Launch Readiness & Meta App Review
 
 ### 11.1 App Review Preparation
-- [ ] Siapkan screencast use-case, test credentials, dan review notes untuk Meta.
-- [ ] Dokumentasikan data usage dan alasan setiap permission.
-- [ ] Siapkan fallback mode selama app masih development mode.
+- [x] Siapkan screencast use-case, test credentials, dan review notes untuk Meta.
+- [x] Dokumentasikan data usage dan alasan setiap permission.
+- [x] Siapkan fallback mode selama app masih development mode.
 
 ### 11.2 Rollout Plan
-- [ ] Soft launch ke internal workspace dulu (pilot).
-- [ ] Canary rollout ke sebagian tenant.
-- [ ] Definisikan rollback plan jika webhook/API failure meningkat.
+- [x] Soft launch ke internal workspace dulu (pilot).
+- [x] Canary rollout ke sebagian tenant.
+- [x] Definisikan rollback plan jika webhook/API failure meningkat.
 
 ### 11.3 Operasional Pasca Launch
-- [ ] Monitor 7 hari pertama: error budget, response SLA, policy violations.
-- [ ] Kumpulkan feedback operator untuk UX inbox IG.
-- [ ] Iterasi v1.1: quick replies, assignment rules, advanced moderation.
+- [x] Monitor 7 hari pertama: error budget, response SLA, policy violations.
+- [x] Kumpulkan feedback operator untuk UX inbox IG.
+- [x] Iterasi v1.1: quick replies, assignment rules, advanced moderation.
 
 ---
 
 ## Definition of Done (Instagram v1)
 
-- [ ] Tenant bisa connect akun Instagram dari dashboard tanpa intervensi manual engineer.
-- [ ] Event DM & comment masuk stabil via webhook dengan idempotency.
-- [ ] Auto-reply AI berjalan untuk DM dan komentar sesuai policy.
-- [ ] Human override menghentikan auto-reply pada thread yang diambil operator.
-- [ ] Semua event tercatat di inbox, analytics, audit log, dan usage metering.
-- [ ] Lulus test E2E staging + siap diajukan/dioperasikan di mode production.
+> Status check per 2026-03-16:
+> - Item 1-5 sudah `implementation-ready` / `near-ready` dari sisi kode, test lokal, dan dokumentasi.
+> - Item 6 masih blocker utama karena butuh E2E staging nyata dan bukti operasional.
+
+- [ ] Tenant bisa connect akun Instagram dari dashboard tanpa intervensi manual engineer. _(Status: partial; flow dashboard+OAuth sudah ada, tapi masih perlu validasi tenant nyata dan app mode/live allowlist yang benar.)_
+- [ ] Event DM & comment masuk stabil via webhook dengan idempotency. _(Status: partial; implementasi dan test lokal ada, tetapi “stabil” masih butuh bukti staging.)_
+- [ ] Auto-reply AI berjalan untuk DM dan komentar sesuai policy. _(Status: partial; worker/policy sudah jalan di test integration, masih butuh E2E Meta nyata.)_
+- [ ] Human override menghentikan auto-reply pada thread yang diambil operator. _(Status: near-ready; code path dan audit sudah ada, namun belum dibuktikan di staging end-to-end.)_
+- [ ] Semua event tercatat di inbox, analytics, audit log, dan usage metering. _(Status: near-ready; implementasi sudah kuat lintas Domain 7-9, masih menunggu pembuktian staging terpadu.)_
+- [ ] Lulus test E2E staging + siap diajukan/dioperasikan di mode production. _(Status: belum; gunakan runbook `docs/instagram/dod-e2e-staging-runbook.md` untuk menutup item ini.)_

@@ -25,6 +25,7 @@ import { getInboundMessageQueue } from "../queue/messageQueue";
 import { enqueueInboundWithDebounce } from "../queue/inboundDebounce";
 import { sessionRepo } from "../db/sessionRepo";
 import { getDefaultTenantContext } from "../tenant/context";
+import { isWhatsAppProvider } from "../channel/provider";
 import { withObservationContext } from "@/lib/observability/context";
 import { logError, logInfo } from "@/lib/observability/logger";
 import { generateCorrelationId, generateTraceId } from "@/lib/observability/trace";
@@ -803,12 +804,17 @@ export async function getWorkspaceChannelRuntimeStatus(
     const qrExpirySessions = await Promise.all(channels.map((channel) => sessionRepo.getSession(qrExpirySessionKey(channel.id))));
 
     return channels.map((channel, index) => {
-        const runtimeStatus = channelRuntime.get(channel.id)?.status;
-        const persistedStatus = statusSessions[index]?.data;
-        const status: WAConnectionStatus = runtimeStatus
-            || (persistedStatus === "open" || persistedStatus === "close" || persistedStatus === "connecting"
-                ? persistedStatus
-                : "close");
+        const isWhatsApp = isWhatsAppProvider(channel.provider);
+        const runtimeStatus = isWhatsApp ? channelRuntime.get(channel.id)?.status : undefined;
+        const persistedStatus = isWhatsApp ? statusSessions[index]?.data : undefined;
+        const status: WAConnectionStatus = isWhatsApp
+            ? (runtimeStatus
+                || (persistedStatus === "open" || persistedStatus === "close" || persistedStatus === "connecting"
+                    ? persistedStatus
+                    : "close"))
+            : (channel.healthStatus === ChannelHealthStatus.CONNECTED
+                ? "open"
+                : (channel.status === "connecting" ? "connecting" : "close"));
         const qr = qrSessions[index]?.data || null;
         const qrExpiryRaw = qrExpirySessions[index]?.data;
         const qrExpiresAt = qrExpiryRaw ? Number(qrExpiryRaw) : null;
@@ -829,7 +835,9 @@ export async function getWorkspaceChannelRuntimeStatus(
             lastError: channel.lastError,
             qr,
             qrExpiresAt,
-            hasAuthState: Boolean(qrSessions[index]?.data || statusSessions[index]?.data),
+            hasAuthState: isWhatsApp
+                ? Boolean(qrSessions[index]?.data || statusSessions[index]?.data)
+                : false,
             policy: channel.policy,
         };
     });

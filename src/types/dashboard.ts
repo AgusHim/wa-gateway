@@ -10,6 +10,8 @@ export type UsersSearchParams = DashboardDateRangeSearchParams;
 export type ConversationsSearchParams = DashboardDateRangeSearchParams & {
     userId?: string;
     channelId?: string;
+    source?: string;
+    threadId?: string;
 };
 
 export type ToolLogsSearchParams = {
@@ -93,16 +95,61 @@ export type AnalyticsTokenUsage = {
     estimatedCostUsd: number;
 };
 
+export type AnalyticsFailReason = {
+    reason: string;
+    count: number;
+};
+
+export type AnalyticsInstagramDelivery = {
+    successCount: number;
+    failedCount: number;
+    successRate: number;
+    topFailReasons: AnalyticsFailReason[];
+};
+
+export type AnalyticsInstagramKpis = {
+    dmCount: number;
+    commentCount: number;
+    avgResponseTimeMs: number;
+    autoReplyCount: number;
+    humanHandledCount: number;
+    autoReplyRatio: number;
+};
+
+export type AnalyticsInstagramContentInsight = {
+    mediaId: string;
+    inboundCommentCount: number;
+    botReplyCount: number;
+};
+
 export type AnalyticsSummary = {
     messageVolume: AnalyticsMessageVolume[];
     topTools: AnalyticsToolUsage[];
     tokenUsage: AnalyticsTokenUsage[];
+    instagramDelivery: AnalyticsInstagramDelivery;
+    instagramKpis: AnalyticsInstagramKpis;
+    instagramContentInsights: AnalyticsInstagramContentInsight[];
 };
 
 export const EMPTY_ANALYTICS_SUMMARY: AnalyticsSummary = {
     messageVolume: [],
     topTools: [],
     tokenUsage: [],
+    instagramDelivery: {
+        successCount: 0,
+        failedCount: 0,
+        successRate: 0,
+        topFailReasons: [],
+    },
+    instagramKpis: {
+        dmCount: 0,
+        commentCount: 0,
+        avgResponseTimeMs: 0,
+        autoReplyCount: 0,
+        humanHandledCount: 0,
+        autoReplyRatio: 0,
+    },
+    instagramContentInsights: [],
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -257,6 +304,88 @@ function parseTokenUsageItem(value: unknown): AnalyticsTokenUsage | null {
     };
 }
 
+function parseFailReasonItem(value: unknown): AnalyticsFailReason | null {
+    if (!isObject(value)) return null;
+    const count = readNumber(value.count);
+    if (typeof value.reason !== "string" || count === null) {
+        return null;
+    }
+    return {
+        reason: value.reason,
+        count,
+    };
+}
+
+function parseInstagramDelivery(value: unknown): AnalyticsInstagramDelivery | null {
+    if (!isObject(value) || !Array.isArray(value.topFailReasons)) {
+        return null;
+    }
+
+    const successCount = readNumber(value.successCount);
+    const failedCount = readNumber(value.failedCount);
+    const successRate = readNumber(value.successRate);
+
+    if (successCount === null || failedCount === null || successRate === null) {
+        return null;
+    }
+
+    return {
+        successCount,
+        failedCount,
+        successRate,
+        topFailReasons: value.topFailReasons
+            .map(parseFailReasonItem)
+            .filter((item): item is AnalyticsFailReason => item !== null),
+    };
+}
+
+function parseInstagramKpis(value: unknown): AnalyticsInstagramKpis | null {
+    if (!isObject(value)) return null;
+
+    const dmCount = readNumber(value.dmCount);
+    const commentCount = readNumber(value.commentCount);
+    const avgResponseTimeMs = readNumber(value.avgResponseTimeMs);
+    const autoReplyCount = readNumber(value.autoReplyCount);
+    const humanHandledCount = readNumber(value.humanHandledCount);
+    const autoReplyRatio = readNumber(value.autoReplyRatio);
+
+    if (
+        dmCount === null
+        || commentCount === null
+        || avgResponseTimeMs === null
+        || autoReplyCount === null
+        || humanHandledCount === null
+        || autoReplyRatio === null
+    ) {
+        return null;
+    }
+
+    return {
+        dmCount,
+        commentCount,
+        avgResponseTimeMs,
+        autoReplyCount,
+        humanHandledCount,
+        autoReplyRatio,
+    };
+}
+
+function parseInstagramContentInsight(value: unknown): AnalyticsInstagramContentInsight | null {
+    if (!isObject(value)) return null;
+
+    const inboundCommentCount = readNumber(value.inboundCommentCount);
+    const botReplyCount = readNumber(value.botReplyCount);
+    if (typeof value.mediaId !== "string" || inboundCommentCount === null || botReplyCount === null) {
+        return null;
+    }
+
+    return {
+        mediaId: value.mediaId,
+        inboundCommentCount,
+        botReplyCount,
+    };
+}
+
 export function parseAnalyticsSummary(value: unknown): AnalyticsSummary | null {
     if (!isObject(value)) return null;
     if (
@@ -276,10 +405,22 @@ export function parseAnalyticsSummary(value: unknown): AnalyticsSummary | null {
     const tokenUsage = value.tokenUsage
         .map(parseTokenUsageItem)
         .filter((item): item is AnalyticsTokenUsage => item !== null);
+    const instagramDelivery = parseInstagramDelivery(value.instagramDelivery)
+        || EMPTY_ANALYTICS_SUMMARY.instagramDelivery;
+    const instagramKpis = parseInstagramKpis(value.instagramKpis)
+        || EMPTY_ANALYTICS_SUMMARY.instagramKpis;
+    const instagramContentInsights = Array.isArray(value.instagramContentInsights)
+        ? value.instagramContentInsights
+            .map(parseInstagramContentInsight)
+            .filter((item): item is AnalyticsInstagramContentInsight => item !== null)
+        : [];
 
     return {
         messageVolume,
         topTools,
         tokenUsage,
+        instagramDelivery,
+        instagramKpis,
+        instagramContentInsights,
     };
 }

@@ -64,6 +64,9 @@ enum PaymentEventStatus {
 enum UsageMetric {
   INBOUND_MESSAGE
   OUTBOUND_MESSAGE
+  IG_INBOUND
+  IG_OUTBOUND
+  IG_COMMENT_REPLY
   AI_TOKEN
   TOOL_CALL
   MEDIA_IN
@@ -75,6 +78,17 @@ enum ChannelHealthStatus {
   DEGRADED
   DISCONNECTED
   BANNED_RISK
+}
+
+enum ChannelProvider {
+  WHATSAPP
+  INSTAGRAM
+}
+
+enum InstagramTokenStatus {
+  CONNECTED
+  EXPIRED
+  INVALID
 }
 
 enum HandoverTicketStatus {
@@ -185,6 +199,7 @@ model Workspace {
   memories       Memory[]
   toolLogs       ToolLog[]
   channels       Channel[]
+  instagramChannelConfigs InstagramChannelConfig[]
   config         WorkspaceConfig?
   promptVersions WorkspacePromptVersion[]
   credentials    WorkspaceCredential[]
@@ -285,6 +300,7 @@ model Channel {
   workspaceId String
   name        String
   provider    String    @default("whatsapp")
+  providerType ChannelProvider @default(WHATSAPP)
   identifier  String?
   status      String    @default("active")
   isEnabled   Boolean   @default(true)
@@ -297,6 +313,7 @@ model Channel {
   lastError   String?
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   audits      ChannelAudit[]
+  instagramConfig InstagramChannelConfig?
   memories    Memory[]
   usageEvents UsageEvent[]
   createdAt   DateTime  @default(now())
@@ -304,6 +321,34 @@ model Channel {
 
   @@index([workspaceId])
   @@index([workspaceId, isEnabled])
+  @@index([workspaceId, providerType, isEnabled])
+}
+
+model InstagramChannelConfig {
+  id                String             @id @default(uuid())
+  workspaceId       String
+  channelId         String             @unique
+  appScopedUserId   String?
+  pageId            String
+  pageName          String?
+  instagramAccountId String
+  instagramUsername String?
+  webhookFields     String[]           @default([])
+  webhookSubscribedAt DateTime?
+  credentialName    String
+  tokenStatus       InstagramTokenStatus @default(CONNECTED)
+  tokenExpiresAt    DateTime?
+  tokenLastRefreshAt DateTime?
+  lastWebhookAt     DateTime?
+  metadata          Json?
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel           Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([workspaceId, instagramAccountId])
+  @@index([workspaceId, pageId])
+  @@index([workspaceId, tokenStatus])
 }
 
 model ChatUser {

@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { getMetricsSnapshot } from "@/lib/observability/metrics";
+import { listWorkerRuntimeSnapshots } from "@/lib/observability/workerRuntime";
 import { listCircuitBreakerSnapshots } from "@/lib/resilience/circuitBreaker";
 
 export const runtime = "nodejs";
+
+function sanitizeQueuePart(value: string): string {
+    return value.trim().replace(/:/g, "_");
+}
 
 function parseWindowMinutes(request: NextRequest): number {
     const raw = request.nextUrl.searchParams.get("windowMinutes");
@@ -22,7 +27,10 @@ export async function GET(request: NextRequest) {
     }
 
     const windowMinutes = parseWindowMinutes(request);
-    const metrics = await getMetricsSnapshot(windowMinutes);
+    const workspaceQueuePart = sanitizeQueuePart(auth.context.workspaceId);
+    const metrics = await getMetricsSnapshot(windowMinutes, {
+        workspaceId: auth.context.workspaceId,
+    });
 
     return NextResponse.json({
         success: true,
@@ -33,6 +41,8 @@ export async function GET(request: NextRequest) {
             metrics,
             circuitBreakers: listCircuitBreakerSnapshots()
                 .filter((snapshot) => snapshot.key.includes(`:${auth.context.workspaceId}:`) || snapshot.key.startsWith(`ai:${auth.context.workspaceId}:`)),
+            workerRuntimes: listWorkerRuntimeSnapshots()
+                .filter((snapshot) => snapshot.queueName.includes(`--${workspaceQueuePart}--`)),
         },
     });
 }

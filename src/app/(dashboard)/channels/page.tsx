@@ -31,6 +31,24 @@ type ChannelRuntime = {
     qrExpiresAt?: number | null;
     policy?: unknown;
     lastError?: string | null;
+    instagramBinding?: {
+        pageId: string;
+        pageName?: string;
+        instagramAccountId: string;
+        instagramUsername?: string;
+        scopes?: string[];
+        expiresAt?: string;
+        status: "connected" | "expired" | "invalid";
+        lastError?: string;
+        lastWebhookAt?: string | null;
+        webhookSubscribedAt?: string | null;
+    } | null;
+    instagramLaunchMode?: {
+        appMode: "live" | "development";
+        fallbackActive: boolean;
+        workspaceAllowed: boolean;
+        message?: string;
+    } | null;
 };
 
 type ChannelAudit = {
@@ -249,6 +267,29 @@ export default function ChannelsPage() {
         return () => {
             active = false;
         };
+    }, []);
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const oauthStatus = params.get("instagram_oauth");
+        if (!oauthStatus) {
+            return;
+        }
+
+        const oauthMessage = params.get("message") || "";
+        if (oauthStatus === "success") {
+            setMessage("Instagram OAuth berhasil terhubung.");
+            setError(null);
+            void refreshChannels(true);
+        } else {
+            setError(oauthMessage || "Instagram OAuth gagal.");
+        }
+
+        params.delete("instagram_oauth");
+        params.delete("message");
+        const nextQuery = params.toString();
+        const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}`;
+        window.history.replaceState({}, "", nextUrl);
     }, []);
 
     useEffect(() => {
@@ -499,6 +540,90 @@ export default function ChannelsPage() {
         }
     };
 
+    const connectInstagramChannel = async () => {
+        if (!selectedChannel) return;
+
+        setIsSubmitting(true);
+        setMessage(null);
+        setError(null);
+
+        try {
+            const response = await fetch(`/api/instagram/channels/${selectedChannel.channelId}/connect`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    returnPath: "/channels",
+                }),
+            });
+            const body = await parseJsonResponse<{
+                success?: boolean;
+                message?: string;
+                data?: { authUrl?: string };
+            }>(response);
+            if (!response.ok || body.success !== true || !body.data?.authUrl) {
+                throw new Error(body.message || "Gagal memulai OAuth Instagram");
+            }
+
+            window.location.href = body.data.authUrl;
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Gagal memulai OAuth Instagram");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const refreshInstagramToken = async () => {
+        if (!selectedChannel) return;
+
+        setIsSubmitting(true);
+        setMessage(null);
+        setError(null);
+
+        try {
+            const response = await fetch(`/api/instagram/channels/${selectedChannel.channelId}/refresh-token`, {
+                method: "POST",
+            });
+            const body = await parseJsonResponse<{ success?: boolean; message?: string }>(response);
+            if (!response.ok || body.success !== true) {
+                throw new Error(body.message || "Gagal refresh token Instagram");
+            }
+
+            await refreshChannels(true);
+            setMessage("Token Instagram berhasil diperbarui.");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Gagal refresh token Instagram");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const disconnectInstagramChannel = async () => {
+        if (!selectedChannel) return;
+
+        setIsSubmitting(true);
+        setMessage(null);
+        setError(null);
+
+        try {
+            const response = await fetch(`/api/instagram/channels/${selectedChannel.channelId}/disconnect`, {
+                method: "POST",
+            });
+            const body = await parseJsonResponse<{ success?: boolean; message?: string }>(response);
+            if (!response.ok || body.success !== true) {
+                throw new Error(body.message || "Gagal disconnect Instagram");
+            }
+
+            await refreshChannels(true);
+            setMessage("Instagram berhasil diputus dari channel.");
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Gagal disconnect Instagram");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
     return (
         <section className="space-y-6">
             <div>
@@ -525,7 +650,7 @@ export default function ChannelsPage() {
                     <div className="mt-3 grid gap-4">
                         <FormField
                             label="Provider"
-                            helper="Pilih channel provider. WhatsApp akan auto connect, Instagram disiapkan untuk integrasi berikutnya."
+                            helper="Pilih provider channel. WhatsApp auto-connect, Instagram via OAuth Connect."
                         >
                             <select
                                 id="create-provider"
@@ -543,7 +668,7 @@ export default function ChannelsPage() {
 
                         <FormField
                             label="Nama Channel"
-                            helper="Nama internal channel untuk membedakan akun WhatsApp di dashboard."
+                            helper="Nama internal channel untuk membedakan akun per provider di dashboard."
                         >
                             <input
                                 id="create-name"
@@ -558,7 +683,7 @@ export default function ChannelsPage() {
 
                         <FormField
                             label="Identifier (Opsional)"
-                            helper="Nomor/identifier akun WA, dipakai untuk identifikasi cepat di tabel channel."
+                            helper="Nomor WA atau IG account id (opsional) untuk identifikasi cepat di tabel channel."
                         >
                             <input
                                 id="create-identifier"
@@ -896,6 +1021,40 @@ export default function ChannelsPage() {
                                 {selectedChannel.qrExpiresAt ? (
                                     <p>QR Expire: {new Date(selectedChannel.qrExpiresAt).toLocaleString("id-ID")}</p>
                                 ) : null}
+                                {!isWhatsAppSelected && selectedChannel.instagramBinding ? (
+                                    <>
+                                        <p>Instagram: {selectedChannel.instagramBinding.instagramUsername || selectedChannel.instagramBinding.instagramAccountId}</p>
+                                        <p>Page: {selectedChannel.instagramBinding.pageName || selectedChannel.instagramBinding.pageId}</p>
+                                        {selectedChannel.instagramBinding.expiresAt ? (
+                                            <p>Token Expire: {new Date(selectedChannel.instagramBinding.expiresAt).toLocaleString("id-ID")}</p>
+                                        ) : null}
+                                        <p>OAuth Status: {selectedChannel.instagramBinding.status}</p>
+                                        <p>
+                                            Scopes: {Array.isArray(selectedChannel.instagramBinding.scopes) && selectedChannel.instagramBinding.scopes.length > 0
+                                                ? selectedChannel.instagramBinding.scopes.join(", ")
+                                                : "-"}
+                                        </p>
+                                        {selectedChannel.instagramBinding.webhookSubscribedAt ? (
+                                            <p>Webhook Subscribed: {new Date(selectedChannel.instagramBinding.webhookSubscribedAt).toLocaleString("id-ID")}</p>
+                                        ) : null}
+                                        {selectedChannel.instagramBinding.lastWebhookAt ? (
+                                            <p>Last Webhook Ping: {new Date(selectedChannel.instagramBinding.lastWebhookAt).toLocaleString("id-ID")}</p>
+                                        ) : (
+                                            <p>Last Webhook Ping: -</p>
+                                        )}
+                                        {selectedChannel.instagramBinding.lastError ? (
+                                            <p className="text-rose-700">OAuth Error: {selectedChannel.instagramBinding.lastError}</p>
+                                        ) : null}
+                                    </>
+                                ) : null}
+                                {!isWhatsAppSelected && selectedChannel.instagramLaunchMode?.fallbackActive ? (
+                                    <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                                        <p className="font-medium">Development Mode Fallback Active</p>
+                                        <p className="mt-1">
+                                            {selectedChannel.instagramLaunchMode.message || "Workspace ini belum diallowlist untuk app mode development."}
+                                        </p>
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="mt-3">
@@ -950,6 +1109,34 @@ export default function ChannelsPage() {
                                 >
                                     Remove Channel
                                 </button>
+                                {!isWhatsAppSelected ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => void connectInstagramChannel()}
+                                            disabled={isSubmitting}
+                                            className="rounded-md border border-sky-300 px-3 py-2 text-xs font-medium text-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            Connect Instagram
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void refreshInstagramToken()}
+                                            disabled={isSubmitting}
+                                            className="rounded-md border border-indigo-300 px-3 py-2 text-xs font-medium text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            Refresh Token
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => void disconnectInstagramChannel()}
+                                            disabled={isSubmitting}
+                                            className="rounded-md border border-amber-300 px-3 py-2 text-xs font-medium text-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            Disconnect Instagram
+                                        </button>
+                                    </>
+                                ) : null}
                             </div>
                         </div>
 

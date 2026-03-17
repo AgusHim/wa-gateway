@@ -19,6 +19,9 @@ type UsagePayload = {
         };
         usage?: {
             messages: UsageMetricRow;
+            instagramInbound: UsageMetricRow;
+            instagramOutbound: UsageMetricRow;
+            instagramCommentReplies: UsageMetricRow;
             aiTokens: UsageMetricRow;
             toolCalls: UsageMetricRow;
             channels: UsageMetricRow;
@@ -86,6 +89,9 @@ export default function UsagePage() {
 
         return [
             { label: "Messages", value: payload.usage.messages },
+            { label: "Instagram Inbound", value: payload.usage.instagramInbound },
+            { label: "Instagram Outbound DM", value: payload.usage.instagramOutbound },
+            { label: "Instagram Comment Replies", value: payload.usage.instagramCommentReplies },
             { label: "AI Tokens", value: payload.usage.aiTokens },
             { label: "Tool Calls", value: payload.usage.toolCalls },
             { label: "Channels", value: payload.usage.channels },

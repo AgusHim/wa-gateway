@@ -5,9 +5,14 @@ export type ObservationContext = {
     traceId?: string;
     spanId?: string;
     spanName?: string;
+    provider?: string;
     organizationId?: string;
     workspaceId?: string;
     channelId?: string;
+    igUserId?: string;
+    threadId?: string;
+    eventId?: string;
+    eventType?: string;
     messageId?: string;
     queueName?: string;
     jobId?: string;

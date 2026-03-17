@@ -35,6 +35,27 @@ export default async function BillingPage() {
             hardLimitReached: snapshot.usage.messages.hardLimitReached,
         },
         {
+            label: "Instagram Inbound",
+            used: snapshot.usage.instagramInbound.used,
+            limit: snapshot.usage.instagramInbound.limit,
+            softLimitReached: snapshot.usage.instagramInbound.softLimitReached,
+            hardLimitReached: snapshot.usage.instagramInbound.hardLimitReached,
+        },
+        {
+            label: "Instagram Outbound DM",
+            used: snapshot.usage.instagramOutbound.used,
+            limit: snapshot.usage.instagramOutbound.limit,
+            softLimitReached: snapshot.usage.instagramOutbound.softLimitReached,
+            hardLimitReached: snapshot.usage.instagramOutbound.hardLimitReached,
+        },
+        {
+            label: "Instagram Comment Replies",
+            used: snapshot.usage.instagramCommentReplies.used,
+            limit: snapshot.usage.instagramCommentReplies.limit,
+            softLimitReached: snapshot.usage.instagramCommentReplies.softLimitReached,
+            hardLimitReached: snapshot.usage.instagramCommentReplies.hardLimitReached,
+        },
+        {
             label: "AI Tokens",
             used: snapshot.usage.aiTokens.used,
             limit: snapshot.usage.aiTokens.limit,

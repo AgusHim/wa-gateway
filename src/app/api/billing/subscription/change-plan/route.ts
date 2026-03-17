@@ -2,6 +2,7 @@ import { BillingCycle, PlanCode } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { billingService } from "@/lib/billing/service";
+import { assertTrustedRouteOrigin } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
 
@@ -10,6 +11,12 @@ function readString(value: unknown): string {
 }
 
 export async function POST(request: NextRequest) {
+    try {
+        assertTrustedRouteOrigin(request);
+    } catch {
+        return NextResponse.json({ success: false, message: "Invalid request origin" }, { status: 403 });
+    }
+
     const auth = await requireApiSession("manage_billing");
     if (!auth.ok) {
         return auth.response;

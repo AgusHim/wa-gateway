@@ -1,4 +1,4 @@
-import { ChannelHealthStatus, Prisma } from "@prisma/client";
+import { ChannelHealthStatus, ChannelProvider as PrismaChannelProvider, Prisma } from "@prisma/client";
 import { prisma } from "./client";
 import { assertTenantScope } from "@/lib/tenant/context";
 import { ChannelProvider, normalizeChannelProvider } from "@/lib/channel/provider";
@@ -33,6 +33,12 @@ function sanitizePolicy(policy: ChannelSendPolicy | null | undefined): ChannelSe
     };
 }
 
+function toPrismaChannelProvider(provider: ChannelProvider): PrismaChannelProvider {
+    return provider === "instagram"
+        ? PrismaChannelProvider.INSTAGRAM
+        : PrismaChannelProvider.WHATSAPP;
+}
+
 const channelAuditInclude = Prisma.validator<Prisma.ChannelAuditInclude>()({
     channel: true,
 });
@@ -46,11 +52,12 @@ export const channelRepo = {
         const resolvedWorkspaceId = assertTenantScope(workspaceId);
         const includeRemoved = options?.includeRemoved === true;
         const provider = options?.provider ? normalizeChannelProvider(options.provider) : undefined;
+        const providerType = provider ? toPrismaChannelProvider(provider) : undefined;
 
         return prisma.channel.findMany({
             where: {
                 workspaceId: resolvedWorkspaceId,
-                provider,
+                providerType,
                 ...(includeRemoved ? {} : { status: { not: "removed" } }),
             },
             orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
@@ -59,9 +66,10 @@ export const channelRepo = {
 
     async listActiveRuntimeChannels(provider: ChannelProvider | string = "whatsapp") {
         const resolvedProvider = normalizeChannelProvider(provider);
+        const providerType = toPrismaChannelProvider(resolvedProvider);
         return prisma.channel.findMany({
             where: {
-                provider: resolvedProvider,
+                providerType,
                 isEnabled: true,
                 status: { not: "removed" },
                 workspace: { isActive: true },
@@ -184,6 +192,7 @@ export const channelRepo = {
                 workspaceId: resolvedWorkspaceId,
                 name: input.name.trim(),
                 provider,
+                providerType: toPrismaChannelProvider(provider),
                 identifier: input.identifier?.trim() || null,
                 status: "active",
                 isEnabled: true,
@@ -265,6 +274,18 @@ export const channelRepo = {
         }
 
         await this.ensureWorkspaceHasPrimary(updated.workspaceId);
+
+        if (input.policy !== undefined) {
+            await this.createAudit(updated.id, {
+                eventType: `${updated.provider}_channel_policy_updated`,
+                status: "success",
+                message: "channel_policy_updated",
+                metadata: {
+                    provider: updated.provider,
+                    policy: sanitizePolicy(input.policy ?? {}),
+                },
+            });
+        }
 
         return updated;
     },

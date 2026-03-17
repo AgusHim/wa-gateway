@@ -20,6 +20,7 @@ import { billingService } from "@/lib/billing/service";
 import { startMemoryRetentionScheduler } from "@/lib/memory/maintenance";
 import { campaignService } from "@/lib/automation/campaignService";
 import { webhookService } from "@/lib/integrations/webhookService";
+import { startInstagramTokenRefreshScheduler } from "@/lib/integrations/instagram/tokenRefresh";
 import { withTraceSpan } from "@/lib/observability/trace";
 import { logError, logInfo } from "@/lib/observability/logger";
 import { recordDeliveryResult } from "@/lib/observability/metrics";
@@ -227,7 +228,7 @@ function createOutboundProcessor() {
 
             await sendTyping(phoneNumber, text.length, { channelId, workspaceId });
             await sendMessage(phoneNumber, text, { withTyping: false, channelId, workspaceId });
-            await recordDeliveryResult({ workspaceId, channelId, success: true });
+            await recordDeliveryResult({ workspaceId, channelId, success: true, provider: "whatsapp" });
 
             if (campaignRecipientId) {
                 await campaignService.markRecipientSent(campaignRecipientId);
@@ -305,7 +306,10 @@ export async function bootstrap(): Promise<void> {
     await tenantRepo.ensureDefaultTenant();
 
     const { channelRepo } = await import("../lib/db/channelRepo");
-    const activeChannels = await channelRepo.listActiveRuntimeChannels();
+    const [activeWhatsappChannels, activeInstagramChannels] = await Promise.all([
+        channelRepo.listActiveRuntimeChannels("whatsapp"),
+        channelRepo.listActiveRuntimeChannels("instagram"),
+    ]);
 
     ensureProcessorRefsInitialized();
     const inboundProcessor = inboundProcessorRef as (job: Job<InboundMessageJob>) => Promise<void>;
@@ -314,18 +318,26 @@ export async function bootstrap(): Promise<void> {
     // 4. Start queue workers
     startWorker(inboundProcessor);
 
-    for (const channel of activeChannels) {
+    for (const channel of activeWhatsappChannels) {
         startInboundWorkerForPartition(channel.workspaceId, channel.id, inboundProcessor);
         startOutboundWorkerForPartition(channel.workspaceId, channel.id, outboundProcessor);
+    }
+
+    const { startInstagramWebhookWorkerForPartition } = await import("@/lib/integrations/instagram/webhookWorker");
+    for (const channel of activeInstagramChannels) {
+        startInstagramWebhookWorkerForPartition(channel.workspaceId, channel.id);
     }
 
     // 5. Connect to WhatsApp (all active channels)
     await connectToWhatsApp();
     startMemoryRetentionScheduler();
+    await startInstagramTokenRefreshScheduler();
     campaignService.startScheduler();
     webhookService.startDispatcher();
 
     logInfo("gateway.bootstrap.ready", {
-        activeChannelCount: activeChannels.length,
+        activeChannelCount: activeWhatsappChannels.length + activeInstagramChannels.length,
+        activeWhatsappChannelCount: activeWhatsappChannels.length,
+        activeInstagramChannelCount: activeInstagramChannels.length,
     });
 }

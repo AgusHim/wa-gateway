@@ -47,6 +47,7 @@ const TENANT_NAV_ITEMS = [
     { href: "/conversations", label: "Conversations", permission: "read" },
     { href: "/users", label: "Users", permission: "read" },
     { href: "/monitor", label: "Live Monitor", permission: "read" },
+    { href: "/observability", label: "Observability", permission: "read" },
     { href: "/campaigns", label: "Campaigns", permission: "read" },
     { href: "/knowledge", label: "Knowledge Base", permission: "read" },
     { href: "/analytics", label: "Analytics", permission: "read" },

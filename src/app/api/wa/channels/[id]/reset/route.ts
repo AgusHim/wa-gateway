@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { channelRepo } from "@/lib/db/channelRepo";
 import { isWhatsAppProvider } from "@/lib/channel/provider";
+import { assertTrustedRouteOrigin } from "@/lib/security/csrf";
 
 export const runtime = "nodejs";
 
 export async function POST(
-    _request: NextRequest,
+    request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
 ) {
+    try {
+        assertTrustedRouteOrigin(request);
+    } catch {
+        return NextResponse.json({ success: false, message: "Invalid request origin" }, { status: 403 });
+    }
+
     const auth = await requireApiSession("manage_channel");
     if (!auth.ok) {
         return auth.response;
