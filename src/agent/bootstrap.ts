@@ -25,6 +25,7 @@ import { withTraceSpan } from "@/lib/observability/trace";
 import { logError, logInfo } from "@/lib/observability/logger";
 import { recordDeliveryResult } from "@/lib/observability/metrics";
 import { getWorkspaceRuntimeFlags } from "@/lib/tenant/flags";
+import { resolveOutboundJitterDelayMs, wait } from "@/lib/wa/outboundTiming";
 
 let inboundProcessorRef: ((job: Job<InboundMessageJob>) => Promise<void>) | null = null;
 let outboundProcessorRef: ((job: Job<OutboundSendJob>) => Promise<void>) | null = null;
@@ -224,6 +225,17 @@ function createOutboundProcessor() {
                     await campaignService.markRecipientFailed(campaignRecipientId, "billing_limit_reached");
                 }
                 return;
+            }
+
+            const jitterDelayMs = resolveOutboundJitterDelayMs(mode);
+            if (jitterDelayMs > 0) {
+                logInfo("pipeline.outbound.broadcast_jitter_wait", {
+                    phoneNumber,
+                    channelId,
+                    mode,
+                    delayMs: jitterDelayMs,
+                });
+                await wait(jitterDelayMs);
             }
 
             await sendTyping(phoneNumber, text.length, { channelId, workspaceId });
