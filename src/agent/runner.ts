@@ -136,12 +136,12 @@ export async function runAgent(
         const graphIncomingMessage = buildGraphIncomingMessage(source, incomingMessage);
         const runtimeFlags = await getWorkspaceRuntimeFlags(workspaceId);
         if (!runtimeFlags.allowAgent) {
-            return "Maaf, workspace Anda sedang tidak aktif untuk memproses pesan.";
+            return "";
         }
 
         const config = await configRepo.getBotConfig(workspaceId);
         if (!config.isActive) {
-            return "Maaf, bot sedang tidak aktif. Silakan coba lagi nanti.";
+            return "";
         }
 
         const inboundUsageMetric = provider === "instagram"
