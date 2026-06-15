@@ -2,7 +2,7 @@ name: buzzerp
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgres:18.4
     container_name: wa-gateway-postgres
     restart: unless-stopped
     ports:
