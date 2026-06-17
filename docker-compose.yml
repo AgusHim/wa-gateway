@@ -10,12 +10,13 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - ./.docker-data/postgres:/var/lib/postgresql/data
+      - ./.docker-data/postgres:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d wa_gateway" ]
+      test: [ "CMD-SHELL", "PGPASSWORD=password psql -h 127.0.0.1 -U postgres -d wa_gateway -c 'SELECT 1' > /dev/null 2>&1" ]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
+      start_period: 30s
 
   redis:
     image: redis:8.6-alpine
