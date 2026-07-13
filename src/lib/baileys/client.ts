@@ -136,6 +136,9 @@ function mapHealthStatus(status: WAConnectionStatus, reasonCode?: number | null)
     if (reasonCode === DisconnectReason.restartRequired) {
         return "degraded";
     }
+    if (reasonCode === DisconnectReason.connectionReplaced) {
+        return "degraded";
+    }
     if (reasonCode === 401 || reasonCode === 403) {
         return "banned-risk";
     }
@@ -412,12 +415,50 @@ function attachSocketEventHandlers(
 
             if (reasonCode === DisconnectReason.loggedOut) {
                 await clearAuthState(runtime.channelId);
+                return;
             }
 
             if (restartRequired) {
                 setTimeout(() => {
                     void connectToWhatsApp(runtime.channelId);
                 }, 200);
+                return;
+            }
+
+            // 440 = connectionReplaced — another socket took over the session.
+            // This is recoverable but needs a longer delay to avoid rapid
+            // connect/disconnect loops. Don't count toward MAX_RETRIES.
+            if (reasonCode === DisconnectReason.connectionReplaced) {
+                logInfo("wa.connection_replaced", {
+                    channelId: runtime.channelId,
+                    message: "Session replaced by another connection, reconnecting after delay",
+                });
+                setTimeout(() => {
+                    void connectToWhatsApp(runtime.channelId);
+                }, 5_000);
+                return;
+            }
+
+            // 408 = timedOut, 428 = connectionClosed, 515 = connectionLost
+            // Recoverable network issues — retry with moderate backoff, don't
+            // burn through MAX_RETRIES too quickly.
+            if (
+                reasonCode === DisconnectReason.timedOut
+                || reasonCode === DisconnectReason.connectionClosed
+                || reasonCode === DisconnectReason.connectionLost
+            ) {
+                runtime.retryCount = Math.min(runtime.retryCount, 2);
+                const delay = Math.min(2000 * Math.pow(2, runtime.retryCount), 30_000);
+                runtime.retryCount += 1;
+                logInfo("wa.connection_recoverable", {
+                    channelId: runtime.channelId,
+                    reasonCode,
+                    retryCount: runtime.retryCount,
+                    delayMs: delay,
+                });
+                setTimeout(() => {
+                    void connectToWhatsApp(runtime.channelId);
+                }, delay);
                 return;
             }
 
@@ -542,8 +583,18 @@ async function connectSingleChannel(channelId: string): Promise<void> {
     }
 
     const runtime = getOrCreateRuntime(channel.id, channel.workspaceId);
-    if (runtime.sock && runtime.status !== "close") {
+    if (runtime.sock && runtime.status === "open") {
         return;
+    }
+
+    // Close stale socket before reconnecting to prevent 440 (connectionReplaced)
+    if (runtime.sock) {
+        try {
+            runtime.sock.end(undefined);
+        } catch {
+            // ignore cleanup errors
+        }
+        runtime.sock = null;
     }
 
     const authDir = getAuthDir(channel.id);

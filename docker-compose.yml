@@ -39,6 +39,8 @@ services:
     image: gushim/wa-buzzerp:latest
     container_name: wa-gateway-app
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/wa_gateway?schema=public
       REDIS_URL: redis://redis:6379
