@@ -4,6 +4,8 @@ import makeWASocket, {
     makeCacheableSignalKeyStore,
     WASocket,
     fetchLatestBaileysVersion,
+    downloadMediaMessage,
+    type WAMessage,
 } from "@whiskeysockets/baileys";
 import { ChannelHealthStatus, UsageMetric } from "@prisma/client";
 import { Boom } from "@hapi/boom";
@@ -29,6 +31,13 @@ import { isWhatsAppProvider } from "../channel/provider";
 import { withObservationContext } from "@/lib/observability/context";
 import { logError, logInfo } from "@/lib/observability/logger";
 import { generateCorrelationId, generateTraceId } from "@/lib/observability/trace";
+import { extractWhatsAppMediaDescriptor } from "./media";
+import { attachmentPlaceholder, type InboundAttachmentPayload } from "@/lib/media/types";
+import {
+    getMaxInboundMediaBytes,
+    isAllowedInboundMime,
+    storePrivateMedia,
+} from "@/lib/media/storage";
 
 const logger = pino({ level: "silent" });
 const MAX_RETRIES = 5;
@@ -104,6 +113,73 @@ function hasMediaPayload(msg: {
         || message.documentMessage
         || message.stickerMessage
     );
+}
+
+async function captureInboundAttachment(
+    runtime: ChannelRuntimeState,
+    msg: WAMessage
+): Promise<{ attachment: InboundAttachmentPayload; caption: string } | null> {
+    const descriptor = extractWhatsAppMediaDescriptor(msg.message);
+    if (!descriptor) return null;
+
+    const baseAttachment = {
+        type: descriptor.type,
+        fileName: descriptor.fileName,
+        mimeType: descriptor.mimeType,
+        durationMs: descriptor.durationMs,
+        isAnimated: descriptor.isAnimated,
+    } satisfies Omit<InboundAttachmentPayload, "status">;
+
+    try {
+        const maximum = getMaxInboundMediaBytes();
+        if (!isAllowedInboundMime(descriptor.type, descriptor.mimeType)) {
+            throw new Error(`Unsupported ${descriptor.type} MIME type: ${descriptor.mimeType}`);
+        }
+        if (descriptor.declaredByteSize && descriptor.declaredByteSize > maximum) {
+            throw new Error(`Media exceeds maximum size of ${maximum} bytes`);
+        }
+        if (!runtime.sock) {
+            throw new Error("WhatsApp socket is unavailable for media download");
+        }
+
+        const downloaded = await downloadMediaMessage(msg, "buffer", {}, {
+            reuploadRequest: (message) => runtime.sock!.updateMediaMessage(message),
+            logger,
+        });
+        const data = Buffer.from(downloaded);
+        const stored = await storePrivateMedia({
+            workspaceId: runtime.workspaceId,
+            fileName: descriptor.fileName,
+            mimeType: descriptor.mimeType,
+            data,
+        });
+
+        return {
+            caption: descriptor.caption,
+            attachment: {
+                ...baseAttachment,
+                status: "ready",
+                ...stored,
+            },
+        };
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logError("wa.media.capture_failed", error, {
+            workspaceId: runtime.workspaceId,
+            channelId: runtime.channelId,
+            messageId: msg.key.id,
+            mediaType: descriptor.type,
+        });
+        return {
+            caption: descriptor.caption,
+            attachment: {
+                ...baseAttachment,
+                status: "failed",
+                byteSize: descriptor.declaredByteSize,
+                errorMessage: errorMessage.slice(0, 1000),
+            },
+        };
+    }
 }
 
 function getAuthDir(channelId: string) {
@@ -482,7 +558,7 @@ function attachSocketEventHandlers(
 
         for (const msg of messages) {
             const remoteJid = msg.key.remoteJid ?? "";
-            const messageText = getMessageText(msg);
+            const plainMessageText = getMessageText(msg);
             const mediaDetected = hasMediaPayload(msg as { message?: Record<string, unknown> | null });
 
             if (msg.key.fromMe) {
@@ -496,7 +572,7 @@ function attachSocketEventHandlers(
 
                 if (!isSelfChat) {
                     try {
-                        await handleManualOperatorMessage(runtime, remoteJid, messageText);
+                        await handleManualOperatorMessage(runtime, remoteJid, plainMessageText);
                     } catch (error) {
                         logError("wa.manual_operator_message.process_failed", error, {
                             workspaceId: runtime.workspaceId,
@@ -525,7 +601,13 @@ function attachSocketEventHandlers(
                 });
             }
 
-            if (!messageText || !phoneNumber) continue;
+            if (!phoneNumber) continue;
+
+            const capturedMedia = await captureInboundAttachment(runtime, msg);
+            const messageText = plainMessageText
+                || capturedMedia?.caption
+                || (capturedMedia ? attachmentPlaceholder(capturedMedia.attachment.type) : "");
+            if (!messageText) continue;
 
             const messageId = msg.key.id ?? "";
             const correlationId = generateCorrelationId();
@@ -565,6 +647,8 @@ function attachSocketEventHandlers(
                     enqueuedAt: Date.now(),
                     correlationId,
                     traceId,
+                    attachment: capturedMedia?.attachment,
+                    skipAgentResponse: Boolean(capturedMedia && !capturedMedia.caption && !plainMessageText),
                 });
 
                 logInfo("pipeline.wa.inbound_enqueued", {
@@ -711,7 +795,7 @@ export async function sendMessage(
     phoneNumber: string,
     text: string,
     options?: { withTyping?: boolean; channelId?: string; workspaceId?: string }
-): Promise<void> {
+): Promise<string | null> {
     const resolvedChannelId = await resolveChannelIdForSend({
         channelId: options?.channelId,
         workspaceId: options?.workspaceId,
@@ -733,6 +817,7 @@ export async function sendMessage(
 
     const sent = await sock.sendMessage(jid, { text });
     trackSentMessage(runtime, sent?.key?.id);
+    return sent?.key?.id || null;
 }
 
 export async function sendTyping(

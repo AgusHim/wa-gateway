@@ -45,6 +45,8 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-wa_gateway}?schema=public
       REDIS_URL: redis://redis:6379
+      WA_MEDIA_STORAGE_ROOT: /app/.wa-media
+      WA_MEDIA_STORAGE_DRIVER: ${WA_MEDIA_STORAGE_DRIVER:-r2}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,6 +54,8 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+    volumes:
+      - media_data:/app/.wa-media
     networks:
       - internal
 
@@ -60,6 +64,8 @@ volumes:
     name: buzzerp_postgres_data
   redis_data:
     name: buzzerp_redis_data
+  media_data:
+    name: buzzerp_media_data
 
 networks:
   internal:

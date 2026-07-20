@@ -2,6 +2,7 @@ import { getDefaultTenantContext } from "../lib/tenant/context";
 import { UsageMetric } from "@prisma/client";
 import { logError, logInfo, logWarn } from "../lib/observability/logger";
 import { withTraceSpan } from "../lib/observability/trace";
+import type { InboundAttachmentPayload } from "@/lib/media/types";
 
 export type AgentExecutor = (
     phoneNumber: string,
@@ -29,6 +30,8 @@ export type RunAgentOptions = {
     eventKey?: string;
     batchCount?: number;
     sourceEventIds?: string[];
+    attachments?: InboundAttachmentPayload[];
+    sourceMessageId?: string;
 };
 
 function shouldPersistAssistantMessage(content: string): boolean {
@@ -207,6 +210,7 @@ export async function runAgent(
             userId: user.id,
             role: "user",
             content: incomingMessage,
+            attachments: options?.attachments,
             metadata: {
                 channelId,
                 intent: intent.intent,
@@ -225,6 +229,7 @@ export async function runAgent(
                 eventKey: options?.eventKey,
                 batchCount: options?.batchCount,
                 sourceEventIds: options?.sourceEventIds,
+                sourceMessageId: options?.sourceMessageId,
             },
         });
 

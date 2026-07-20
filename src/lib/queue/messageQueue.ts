@@ -1,6 +1,7 @@
 import { Queue } from "bullmq";
 import { redis } from "./client";
 import { assertTenantScope, getDefaultTenantContext } from "@/lib/tenant/context";
+import type { InboundAttachmentPayload } from "@/lib/media/types";
 
 export interface InboundMessageJob {
     workspaceId: string;
@@ -18,6 +19,8 @@ export interface InboundMessageJob {
     debouncedCount?: number;
     firstBufferedAt?: number;
     sourceMessageIds?: string[];
+    attachment?: InboundAttachmentPayload;
+    skipAgentResponse?: boolean;
 }
 
 export interface OutboundSendJob {

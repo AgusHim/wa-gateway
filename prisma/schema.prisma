@@ -154,23 +154,23 @@ enum WebhookDeliveryStatus {
 }
 
 model Organization {
-  id          String       @id @default(uuid())
-  name        String
-  slug        String       @unique
-  isActive    Boolean      @default(true)
-  memberships Membership[]
-  workspaces  Workspace[]
-  invites     OrganizationInvite[]
-  defaultUsers User[]      @relation("UserDefaultOrganization")
-  billingProfile BillingProfile?
-  subscriptions Subscription[]
-  invoices      Invoice[]
-  paymentEvents PaymentEvent[]
-  usageEvents   UsageEvent[]
-  usageDailyAggregates UsageDailyAggregate[]
+  id                     String                  @id @default(uuid())
+  name                   String
+  slug                   String                  @unique
+  isActive               Boolean                 @default(true)
+  memberships            Membership[]
+  workspaces             Workspace[]
+  invites                OrganizationInvite[]
+  defaultUsers           User[]                  @relation("UserDefaultOrganization")
+  billingProfile         BillingProfile?
+  subscriptions          Subscription[]
+  invoices               Invoice[]
+  paymentEvents          PaymentEvent[]
+  usageEvents            UsageEvent[]
+  usageDailyAggregates   UsageDailyAggregate[]
   usageMonthlyAggregates UsageMonthlyAggregate[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 }
 
 model Membership {
@@ -188,136 +188,138 @@ model Membership {
 }
 
 model Workspace {
-  id             String          @id @default(uuid())
-  organizationId String
-  name           String
-  slug           String
-  isActive       Boolean         @default(true)
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  chatUsers      ChatUser[]
-  messages       Message[]
-  memories       Memory[]
-  toolLogs       ToolLog[]
-  channels       Channel[]
+  id                      String                   @id @default(uuid())
+  organizationId          String
+  name                    String
+  slug                    String
+  isActive                Boolean                  @default(true)
+  organization            Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chatUsers               ChatUser[]
+  messages                Message[]
+  messageAttachments      MessageAttachment[]
+  memories                Memory[]
+  toolLogs                ToolLog[]
+  channels                Channel[]
   instagramChannelConfigs InstagramChannelConfig[]
-  config         WorkspaceConfig?
-  promptVersions WorkspacePromptVersion[]
-  credentials    WorkspaceCredential[]
-  toolPolicies   WorkspaceToolPolicy[]
-  handoverTickets HandoverTicket[]
-  campaigns      Campaign[]
-  campaignRecipients CampaignRecipient[]
-  knowledgeSources KnowledgeSource[]
-  knowledgeChunks  KnowledgeChunk[]
-  apiKeys        WorkspaceApiKey[]
-  webhookEndpoints WebhookEndpoint[]
-  webhookDeliveries WebhookDelivery[]
-  memberships    WorkspaceMembership[]
-  usageEvents    UsageEvent[]
-  usageDailyAggregates UsageDailyAggregate[]
-  usageMonthlyAggregates UsageMonthlyAggregate[]
-  defaultUsers   User[]           @relation("UserDefaultWorkspace")
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  config                  WorkspaceConfig?
+  promptVersions          WorkspacePromptVersion[]
+  credentials             WorkspaceCredential[]
+  toolPolicies            WorkspaceToolPolicy[]
+  handoverTickets         HandoverTicket[]
+  campaigns               Campaign[]
+  campaignRecipients      CampaignRecipient[]
+  knowledgeSources        KnowledgeSource[]
+  knowledgeChunks         KnowledgeChunk[]
+  apiKeys                 WorkspaceApiKey[]
+  webhookEndpoints        WebhookEndpoint[]
+  webhookDeliveries       WebhookDelivery[]
+  memberships             WorkspaceMembership[]
+  usageEvents             UsageEvent[]
+  usageDailyAggregates    UsageDailyAggregate[]
+  usageMonthlyAggregates  UsageMonthlyAggregate[]
+  defaultUsers            User[]                   @relation("UserDefaultWorkspace")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
   @@unique([organizationId, slug])
   @@index([organizationId])
 }
 
 model WorkspaceConfig {
-  id         String    @id @default(uuid())
-  workspaceId String   @unique
-  isActive   Boolean   @default(true)
-  model      String    @default("gemini-2.5-flash-lite")
-  maxTokens  Int       @default(1024)
-  temperature Float    @default(0.4)
-  safetyProfile String @default("balanced")
-  fallbackModels String[] @default([])
-  memoryRetentionDays Int @default(90)
-  piiRedactionEnabled Boolean @default(true)
-  timezone     String    @default("Asia/Jakarta")
-  businessHoursStart String @default("08:00")
-  businessHoursEnd String @default("20:00")
-  businessDays Int[] @default([1,2,3,4,5])
-  outOfHoursAutoReplyEnabled Boolean @default(false)
-  outOfHoursMessage String @default("Terima kasih, pesan Anda sudah diterima. Tim kami akan membalas pada jam operasional.")
-  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                         String    @id @default(uuid())
+  workspaceId                String    @unique
+  isActive                   Boolean   @default(true)
+  model                      String    @default("gemini-2.5-flash-lite")
+  maxTokens                  Int       @default(1024)
+  temperature                Float     @default(0.4)
+  safetyProfile              String    @default("balanced")
+  fallbackModels             String[]  @default([])
+  memoryRetentionDays        Int       @default(90)
+  piiRedactionEnabled        Boolean   @default(true)
+  timezone                   String    @default("Asia/Jakarta")
+  businessHoursStart         String    @default("08:00")
+  businessHoursEnd           String    @default("20:00")
+  businessDays               Int[]     @default([1, 2, 3, 4, 5])
+  outOfHoursAutoReplyEnabled Boolean   @default(false)
+  outOfHoursMessage          String    @default("Terima kasih, pesan Anda sudah diterima. Tim kami akan membalas pada jam operasional.")
+  workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
 }
 
 model WorkspacePromptVersion {
-  id         String    @id @default(uuid())
-  workspaceId String
-  version    Int
-  title      String?
-  identity   String    @db.Text
-  behavior   String    @db.Text
-  skills     String    @db.Text
-  tools      String?   @db.Text
-  memory     String?   @db.Text
-  isActive   Boolean   @default(false)
+  id              String    @id @default(uuid())
+  workspaceId     String
+  version         Int
+  title           String?
+  identity        String    @db.Text
+  behavior        String    @db.Text
+  skills          String    @db.Text
+  tools           String?   @db.Text
+  memory          String?   @db.Text
+  isActive        Boolean   @default(false)
   createdByUserId String?
-  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt  DateTime  @default(now())
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
 
   @@unique([workspaceId, version])
   @@index([workspaceId, isActive, createdAt])
 }
 
 model WorkspaceCredential {
-  id             String    @id @default(uuid())
-  workspaceId    String
-  name           String
-  provider       String
-  encryptedValue String    @db.Text
-  metadata       Json?
+  id              String    @id @default(uuid())
+  workspaceId     String
+  name            String
+  provider        String
+  encryptedValue  String    @db.Text
+  metadata        Json?
   createdByUserId String?
-  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@unique([workspaceId, name])
   @@index([workspaceId, provider])
 }
 
 model WorkspaceToolPolicy {
-  id          String      @id @default(uuid())
-  workspaceId String
-  toolName    String
-  isEnabled   Boolean     @default(true)
+  id           String       @id @default(uuid())
+  workspaceId  String
+  toolName     String
+  isEnabled    Boolean      @default(true)
   allowedRoles TenantRole[] @default([OWNER, ADMIN, OPERATOR])
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   @@unique([workspaceId, toolName])
   @@index([workspaceId, isEnabled])
 }
 
 model Channel {
-  id          String    @id @default(uuid())
-  workspaceId String
-  name        String
-  provider    String    @default("whatsapp")
-  providerType ChannelProvider @default(WHATSAPP)
-  identifier  String?
-  status      String    @default("active")
-  isEnabled   Boolean   @default(true)
-  isPrimary   Boolean   @default(false)
-  healthStatus ChannelHealthStatus @default(DISCONNECTED)
-  healthScore Int       @default(0)
-  rateLimitPerSecond Int @default(5)
-  policy      Json?
-  lastSeenAt  DateTime?
-  lastError   String?
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  audits      ChannelAudit[]
-  instagramConfig InstagramChannelConfig?
-  memories    Memory[]
-  usageEvents UsageEvent[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                 String                  @id @default(uuid())
+  workspaceId        String
+  name               String
+  provider           String                  @default("whatsapp")
+  providerType       ChannelProvider         @default(WHATSAPP)
+  identifier         String?
+  status             String                  @default("active")
+  isEnabled          Boolean                 @default(true)
+  isPrimary          Boolean                 @default(false)
+  healthStatus       ChannelHealthStatus     @default(DISCONNECTED)
+  healthScore        Int                     @default(0)
+  rateLimitPerSecond Int                     @default(5)
+  policy             Json?
+  lastSeenAt         DateTime?
+  lastError          String?
+  workspace          Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  audits             ChannelAudit[]
+  instagramConfig    InstagramChannelConfig?
+  memories           Memory[]
+  messages           Message[]
+  usageEvents        UsageEvent[]
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
 
   @@index([workspaceId])
   @@index([workspaceId, isEnabled])
@@ -325,26 +327,26 @@ model Channel {
 }
 
 model InstagramChannelConfig {
-  id                String             @id @default(uuid())
-  workspaceId       String
-  channelId         String             @unique
-  appScopedUserId   String?
-  pageId            String
-  pageName          String?
-  instagramAccountId String
-  instagramUsername String?
-  webhookFields     String[]           @default([])
+  id                  String               @id @default(uuid())
+  workspaceId         String
+  channelId           String               @unique
+  appScopedUserId     String?
+  pageId              String
+  pageName            String?
+  instagramAccountId  String
+  instagramUsername   String?
+  webhookFields       String[]             @default([])
   webhookSubscribedAt DateTime?
-  credentialName    String
-  tokenStatus       InstagramTokenStatus @default(CONNECTED)
-  tokenExpiresAt    DateTime?
-  tokenLastRefreshAt DateTime?
-  lastWebhookAt     DateTime?
-  metadata          Json?
-  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  channel           Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  credentialName      String
+  tokenStatus         InstagramTokenStatus @default(CONNECTED)
+  tokenExpiresAt      DateTime?
+  tokenLastRefreshAt  DateTime?
+  lastWebhookAt       DateTime?
+  metadata            Json?
+  workspace           Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel             Channel              @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
 
   @@index([workspaceId, instagramAccountId])
   @@index([workspaceId, pageId])
@@ -352,20 +354,20 @@ model InstagramChannelConfig {
 }
 
 model ChatUser {
-  id            String    @id @default(uuid())
-  workspaceId   String
-  phoneNumber   String
-  name          String?
-  label         String?
-  segments      String[]  @default([])
-  isBlocked     Boolean   @default(false)
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  conversations Message[]
-  memories      Memory[]
-  handoverTickets HandoverTicket[]
+  id                 String              @id @default(uuid())
+  workspaceId        String
+  phoneNumber        String
+  name               String?
+  label              String?
+  segments           String[]            @default([])
+  isBlocked          Boolean             @default(false)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversations      Message[]
+  memories           Memory[]
+  handoverTickets    HandoverTicket[]
   campaignRecipients CampaignRecipient[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@unique([workspaceId, phoneNumber])
   @@index([workspaceId, updatedAt])
@@ -374,19 +376,51 @@ model ChatUser {
 }
 
 model Message {
-  id          String    @id @default(uuid())
-  workspaceId String
-  userId      String
-  role        String // 'user' | 'assistant' | 'system' | 'tool'
-  content     String    @db.Text
-  toolName    String?
-  metadata    Json?
-  createdAt   DateTime  @default(now())
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        ChatUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                String              @id @default(uuid())
+  workspaceId       String
+  userId            String
+  channelId         String?
+  role              String // 'user' | 'assistant' | 'system' | 'tool'
+  content           String              @db.Text
+  toolName          String?
+  deliveryStatus    String?
+  idempotencyKey    String?
+  externalMessageId String?
+  metadata          Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user              ChatUser            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel           Channel?            @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  attachments       MessageAttachment[]
 
+  @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, createdAt])
   @@index([workspaceId, userId, createdAt])
+  @@index([workspaceId, channelId, createdAt])
+}
+
+model MessageAttachment {
+  id           String    @id @default(uuid())
+  workspaceId  String
+  messageId    String
+  type         String
+  status       String    @default("ready")
+  storageKey   String?
+  fileName     String?
+  mimeType     String
+  byteSize     Int?
+  checksum     String?
+  durationMs   Int?
+  isAnimated   Boolean   @default(false)
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  message      Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, storageKey])
+  @@index([workspaceId, messageId])
 }
 
 model Memory {
@@ -419,28 +453,28 @@ model Session {
 }
 
 model User {
-  id           String       @id @default(uuid())
-  email        String       @unique
-  passwordHash String
-  name         String?
-  isActive     Boolean      @default(true)
-  role         TenantRole   @default(VIEWER)
-  emailVerifiedAt DateTime?
-  sessionVersion Int        @default(1)
-  lastLoginAt   DateTime?
-  defaultOrganizationId String?
-  defaultWorkspaceId String?
-  defaultOrganization Organization? @relation("UserDefaultOrganization", fields: [defaultOrganizationId], references: [id], onDelete: SetNull)
-  defaultWorkspace Workspace? @relation("UserDefaultWorkspace", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
-  sessions     Session[]
-  memberships  Membership[]
-  workspaceMemberships WorkspaceMembership[]
-  authSessions AuthSession[]
+  id                      String                   @id @default(uuid())
+  email                   String                   @unique
+  passwordHash            String
+  name                    String?
+  isActive                Boolean                  @default(true)
+  role                    TenantRole               @default(VIEWER)
+  emailVerifiedAt         DateTime?
+  sessionVersion          Int                      @default(1)
+  lastLoginAt             DateTime?
+  defaultOrganizationId   String?
+  defaultWorkspaceId      String?
+  defaultOrganization     Organization?            @relation("UserDefaultOrganization", fields: [defaultOrganizationId], references: [id], onDelete: SetNull)
+  defaultWorkspace        Workspace?               @relation("UserDefaultWorkspace", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
+  sessions                Session[]
+  memberships             Membership[]
+  workspaceMemberships    WorkspaceMembership[]
+  authSessions            AuthSession[]
   emailVerificationTokens EmailVerificationToken[]
-  passwordResetTokens PasswordResetToken[]
-  invitedOrganizations OrganizationInvite[] @relation("OrganizationInviteInviter")
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  passwordResetTokens     PasswordResetToken[]
+  invitedOrganizations    OrganizationInvite[]     @relation("OrganizationInviteInviter")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
   @@index([defaultOrganizationId])
   @@index([defaultWorkspaceId])
@@ -448,7 +482,7 @@ model User {
 }
 
 model WorkspaceMembership {
-  id          String    @id @default(uuid())
+  id          String     @id @default(uuid())
   workspaceId String
   userId      String
   role        TenantRole @default(VIEWER)
@@ -484,43 +518,43 @@ model ToolLog {
 }
 
 model AuthSession {
-  id              String   @id @default(uuid())
-  userId          String
-  sessionTokenHash String  @unique
-  userAgent       String?
-  ipAddress       String?
-  lastSeenAt      DateTime @default(now())
-  expiresAt       DateTime
-  revokedAt       DateTime?
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id               String    @id @default(uuid())
+  userId           String
+  sessionTokenHash String    @unique
+  userAgent        String?
+  ipAddress        String?
+  lastSeenAt       DateTime  @default(now())
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([userId])
   @@index([expiresAt])
 }
 
 model EmailVerificationToken {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   userId     String
   email      String
-  tokenHash  String   @unique
+  tokenHash  String    @unique
   expiresAt  DateTime
   consumedAt DateTime?
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
 
   @@index([userId, email])
 }
 
 model PasswordResetToken {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   userId     String
-  tokenHash  String   @unique
+  tokenHash  String    @unique
   expiresAt  DateTime
   consumedAt DateTime?
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
 
   @@index([userId])
 }
@@ -544,11 +578,11 @@ model OrganizationInvite {
 }
 
 model Plan {
-  id                String   @id @default(uuid())
-  code              PlanCode @unique
+  id                String         @id @default(uuid())
+  code              PlanCode       @unique
   name              String
   description       String?
-  currency          String   @default("USD")
+  currency          String         @default("USD")
   monthlyPriceCents Int
   yearlyPriceCents  Int?
   messageLimit      Int
@@ -556,11 +590,11 @@ model Plan {
   channelLimit      Int
   seatLimit         Int
   toolLimit         Int
-  softLimitRatio    Float    @default(0.8)
-  isActive          Boolean  @default(true)
+  softLimitRatio    Float          @default(0.8)
+  isActive          Boolean        @default(true)
   subscriptions     Subscription[]
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 }
 
 model BillingProfile {
@@ -582,27 +616,27 @@ model BillingProfile {
 }
 
 model Subscription {
-  id                   String             @id @default(uuid())
-  organizationId       String
-  planId               String
-  status               SubscriptionStatus @default(TRIALING)
-  billingCycle         BillingCycle       @default(MONTHLY)
-  provider             PaymentProvider    @default(MANUAL)
+  id                     String             @id @default(uuid())
+  organizationId         String
+  planId                 String
+  status                 SubscriptionStatus @default(TRIALING)
+  billingCycle           BillingCycle       @default(MONTHLY)
+  provider               PaymentProvider    @default(MANUAL)
   providerSubscriptionId String?
-  currentPeriodStart   DateTime
-  currentPeriodEnd     DateTime
-  trialEndAt           DateTime?
-  graceUntil           DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  canceledAt           DateTime?
-  endedAt              DateTime?
-  metadata             Json?
-  organization         Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  plan                 Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
-  invoices             Invoice[]
-  paymentEvents        PaymentEvent[]
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  currentPeriodStart     DateTime
+  currentPeriodEnd       DateTime
+  trialEndAt             DateTime?
+  graceUntil             DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  canceledAt             DateTime?
+  endedAt                DateTime?
+  metadata               Json?
+  organization           Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan                   Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoices               Invoice[]
+  paymentEvents          PaymentEvent[]
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   @@index([organizationId, status])
   @@index([planId])
@@ -610,53 +644,53 @@ model Subscription {
 }
 
 model Invoice {
-  id                 String        @id @default(uuid())
-  organizationId     String
-  subscriptionId     String?
-  invoiceNumber      String        @unique
-  status             InvoiceStatus @default(OPEN)
-  currency           String        @default("USD")
+  id                  String         @id @default(uuid())
+  organizationId      String
+  subscriptionId      String?
+  invoiceNumber       String         @unique
+  status              InvoiceStatus  @default(OPEN)
+  currency            String         @default("USD")
   amountSubtotalCents Int
-  amountTaxCents     Int           @default(0)
-  amountTotalCents   Int
-  periodStart        DateTime
-  periodEnd          DateTime
-  dueAt              DateTime?
-  paidAt             DateTime?
-  providerInvoiceId  String?
-  metadata           Json?
-  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subscription       Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  paymentEvents      PaymentEvent[]
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  amountTaxCents      Int            @default(0)
+  amountTotalCents    Int
+  periodStart         DateTime
+  periodEnd           DateTime
+  dueAt               DateTime?
+  paidAt              DateTime?
+  providerInvoiceId   String?
+  metadata            Json?
+  organization        Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription        Subscription?  @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  paymentEvents       PaymentEvent[]
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   @@index([organizationId, status])
   @@index([subscriptionId])
 }
 
 model PaymentEvent {
-  id               String             @id @default(uuid())
-  organizationId   String
-  subscriptionId   String?
-  invoiceId        String?
-  provider         PaymentProvider    @default(MANUAL)
-  providerEventId  String?
-  idempotencyKey   String             @unique
-  eventType        String
-  status           PaymentEventStatus @default(RECEIVED)
-  amountCents      Int?
-  currency         String?
-  payload          Json
-  retries          Int                @default(0)
-  nextRetryAt      DateTime?
-  processedAt      DateTime?
-  lastError        String?
-  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subscription     Subscription?      @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-  invoice          Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id              String             @id @default(uuid())
+  organizationId  String
+  subscriptionId  String?
+  invoiceId       String?
+  provider        PaymentProvider    @default(MANUAL)
+  providerEventId String?
+  idempotencyKey  String             @unique
+  eventType       String
+  status          PaymentEventStatus @default(RECEIVED)
+  amountCents     Int?
+  currency        String?
+  payload         Json
+  retries         Int                @default(0)
+  nextRetryAt     DateTime?
+  processedAt     DateTime?
+  lastError       String?
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription    Subscription?      @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  invoice         Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([organizationId, status])
   @@index([provider, providerEventId])
@@ -664,7 +698,7 @@ model PaymentEvent {
 }
 
 model UsageEvent {
-  id             String      @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   workspaceId    String
   channelId      String?
@@ -672,11 +706,11 @@ model UsageEvent {
   quantity       Int
   referenceId    String?
   metadata       Json?
-  occurredAt     DateTime    @default(now())
+  occurredAt     DateTime     @default(now())
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  channel        Channel?    @relation(fields: [channelId], references: [id], onDelete: SetNull)
-  createdAt      DateTime    @default(now())
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel        Channel?     @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
 
   @@index([workspaceId, occurredAt])
   @@index([organizationId, occurredAt])
@@ -684,96 +718,96 @@ model UsageEvent {
 }
 
 model UsageDailyAggregate {
-  id             String      @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   workspaceId    String
   metric         UsageMetric
   date           DateTime
-  quantity       Int         @default(0)
+  quantity       Int          @default(0)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([workspaceId, metric, date])
   @@index([organizationId, metric, date])
 }
 
 model UsageMonthlyAggregate {
-  id             String      @id @default(uuid())
+  id             String       @id @default(uuid())
   organizationId String
   workspaceId    String
   metric         UsageMetric
   month          DateTime
-  quantity       Int         @default(0)
+  quantity       Int          @default(0)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   @@unique([workspaceId, metric, month])
   @@index([organizationId, metric, month])
 }
 
 model ChannelAudit {
-  id         String   @id @default(uuid())
-  channelId  String
-  eventType  String
-  status     String
-  message    String?
-  metadata   Json?
-  channel    Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  id        String   @id @default(uuid())
+  channelId String
+  eventType String
+  status    String
+  message   String?
+  metadata  Json?
+  channel   Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
 
   @@index([channelId, createdAt])
 }
 
 model HandoverTicket {
-  id           String             @id @default(uuid())
-  workspaceId  String
-  userId       String?
-  phoneNumber  String
-  topic        String?
-  keyword      String?
-  priority     String             @default("normal")
-  status       HandoverTicketStatus @default(OPEN)
-  triggeredBy  String?
-  slaDueAt     DateTime
+  id              String               @id @default(uuid())
+  workspaceId     String
+  userId          String?
+  phoneNumber     String
+  topic           String?
+  keyword         String?
+  priority        String               @default("normal")
+  status          HandoverTicketStatus @default(OPEN)
+  triggeredBy     String?
+  slaDueAt        DateTime
   firstResponseAt DateTime?
-  resolvedAt   DateTime?
-  lastUserMessage String?         @db.Text
-  metadata     Json?
-  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user         ChatUser?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  resolvedAt      DateTime?
+  lastUserMessage String?              @db.Text
+  metadata        Json?
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            ChatUser?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
 
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, phoneNumber, status])
 }
 
 model Campaign {
-  id              String          @id @default(uuid())
-  workspaceId     String
-  name            String
-  messageTemplate String          @db.Text
-  status          CampaignStatus  @default(DRAFT)
-  segment         Json?
-  throttlePerSecond Int           @default(5)
-  scheduledAt     DateTime?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  metadata        Json?
-  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  recipients      CampaignRecipient[]
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  id                String              @id @default(uuid())
+  workspaceId       String
+  name              String
+  messageTemplate   String              @db.Text
+  status            CampaignStatus      @default(DRAFT)
+  segment           Json?
+  throttlePerSecond Int                 @default(5)
+  scheduledAt       DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  metadata          Json?
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recipients        CampaignRecipient[]
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   @@index([workspaceId, status, scheduledAt])
 }
 
 model CampaignRecipient {
-  id          String                 @id @default(uuid())
+  id          String                  @id @default(uuid())
   campaignId  String
   workspaceId String
   userId      String?
@@ -785,11 +819,11 @@ model CampaignRecipient {
   convertedAt DateTime?
   lastError   String?
   metadata    Json?
-  campaign    Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user        ChatUser?             @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
+  campaign    Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  workspace   Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        ChatUser?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
 
   @@unique([campaignId, phoneNumber])
   @@index([workspaceId, status, createdAt])
@@ -797,56 +831,56 @@ model CampaignRecipient {
 }
 
 model KnowledgeSource {
-  id          String              @id @default(uuid())
-  workspaceId String
-  version     Int
-  title       String
-  type        KnowledgeSourceType
-  sourceUrl   String?
-  fileName    String?
-  content     String              @db.Text
-  status      KnowledgeSourceStatus @default(ACTIVE)
-  metadata    Json?
+  id              String                @id @default(uuid())
+  workspaceId     String
+  version         Int
+  title           String
+  type            KnowledgeSourceType
+  sourceUrl       String?
+  fileName        String?
+  content         String                @db.Text
+  status          KnowledgeSourceStatus @default(ACTIVE)
+  metadata        Json?
   createdByUserId String?
-  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  chunks      KnowledgeChunk[]
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chunks          KnowledgeChunk[]
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 
   @@unique([workspaceId, version])
   @@index([workspaceId, status, createdAt])
 }
 
 model KnowledgeChunk {
-  id          String      @id @default(uuid())
-  sourceId    String
-  workspaceId String
-  chunkIndex  Int
-  content     String      @db.Text
-  tokenEstimate Int       @default(0)
-  source      KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
+  id            String          @id @default(uuid())
+  sourceId      String
+  workspaceId   String
+  chunkIndex    Int
+  content       String          @db.Text
+  tokenEstimate Int             @default(0)
+  source        KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt     DateTime        @default(now())
 
   @@unique([sourceId, chunkIndex])
   @@index([workspaceId, createdAt])
 }
 
 model WorkspaceApiKey {
-  id          String      @id @default(uuid())
-  workspaceId String
-  name        String
-  keyPrefix   String
-  keyHash     String      @unique
-  scopes      String[]    @default([])
-  status      ApiKeyStatus @default(ACTIVE)
+  id              String       @id @default(uuid())
+  workspaceId     String
+  name            String
+  keyPrefix       String
+  keyHash         String       @unique
+  scopes          String[]     @default([])
+  status          ApiKeyStatus @default(ACTIVE)
   createdByUserId String?
-  expiresAt   DateTime?
-  lastUsedAt  DateTime?
-  revokedAt   DateTime?
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  revokedAt       DateTime?
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@unique([workspaceId, name])
   @@index([workspaceId, status, createdAt])
@@ -854,51 +888,51 @@ model WorkspaceApiKey {
 }
 
 model WebhookEndpoint {
-  id          String      @id @default(uuid())
-  workspaceId String
-  name        String
-  url         String
-  secretEncrypted String  @db.Text
-  events      WebhookEventType[] @default([MESSAGE_RECEIVED, MESSAGE_SENT, HANDOVER_CREATED, TOOL_FAILED])
-  status      WebhookEndpointStatus @default(ACTIVE)
-  timeoutMs   Int         @default(10000)
-  maxAttempts Int         @default(6)
-  includeHeaders Json?
+  id              String                @id @default(uuid())
+  workspaceId     String
+  name            String
+  url             String
+  secretEncrypted String                @db.Text
+  events          WebhookEventType[]    @default([MESSAGE_RECEIVED, MESSAGE_SENT, HANDOVER_CREATED, TOOL_FAILED])
+  status          WebhookEndpointStatus @default(ACTIVE)
+  timeoutMs       Int                   @default(10000)
+  maxAttempts     Int                   @default(6)
+  includeHeaders  Json?
   createdByUserId String?
   lastDeliveredAt DateTime?
-  lastError   String?
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  deliveries  WebhookDelivery[]
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  lastError       String?
+  workspace       Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries      WebhookDelivery[]
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 
   @@unique([workspaceId, name])
   @@index([workspaceId, status, createdAt])
 }
 
 model WebhookDelivery {
-  id          String      @id @default(uuid())
-  workspaceId String
-  endpointId  String
-  eventType   WebhookEventType
-  eventId     String
-  status      WebhookDeliveryStatus @default(PENDING)
-  attempt     Int         @default(0)
-  maxAttempts Int         @default(6)
-  nextAttemptAt DateTime  @default(now())
-  deliveredAt DateTime?
+  id             String                @id @default(uuid())
+  workspaceId    String
+  endpointId     String
+  eventType      WebhookEventType
+  eventId        String
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempt        Int                   @default(0)
+  maxAttempts    Int                   @default(6)
+  nextAttemptAt  DateTime              @default(now())
+  deliveredAt    DateTime?
   requestHeaders Json?
-  requestBody Json
+  requestBody    Json
   responseStatus Int?
-  responseBody String?
-  error       String?
-  replayOfId  String?
-  replayOf    WebhookDelivery? @relation("WebhookDeliveryReplay", fields: [replayOfId], references: [id], onDelete: SetNull)
-  replays     WebhookDelivery[] @relation("WebhookDeliveryReplay")
-  endpoint    WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  responseBody   String?
+  error          String?
+  replayOfId     String?
+  replayOf       WebhookDelivery?      @relation("WebhookDeliveryReplay", fields: [replayOfId], references: [id], onDelete: SetNull)
+  replays        WebhookDelivery[]     @relation("WebhookDeliveryReplay")
+  endpoint       WebhookEndpoint       @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   @@index([workspaceId, status, nextAttemptAt])
   @@index([endpointId, createdAt])

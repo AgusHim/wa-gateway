@@ -44,6 +44,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:password@postgres:5432/wa_gateway?schema=public
       REDIS_URL: redis://redis:6379
+      WA_MEDIA_STORAGE_ROOT: /app/.wa-media
+      WA_MEDIA_STORAGE_DRIVER: ${WA_MEDIA_STORAGE_DRIVER:-local}
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,3 +53,5 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
+    volumes:
+      - ./.docker-data/media:/app/.wa-media

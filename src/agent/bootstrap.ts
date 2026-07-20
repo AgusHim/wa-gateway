@@ -37,7 +37,7 @@ function createInboundProcessor() {
             return;
         }
 
-        const { workspaceId, channelId, phoneNumber, messageText, pushName } = batch.data;
+        const { workspaceId, channelId, phoneNumber, messageText, pushName, attachment, skipAgentResponse } = batch.data;
         const [{ channelRepo }, { messageRepo }, { userRepo }] = await Promise.all([
             import("../lib/db/channelRepo"),
             import("../lib/db/messageRepo"),
@@ -58,11 +58,15 @@ function createInboundProcessor() {
                     userId: user.id,
                     role: "user",
                     content: messageText,
+                    channelId,
+                    attachments: attachment ? [attachment] : undefined,
                     metadata: {
                         channelId,
                         source: "wa-inbound-skipped-human-operator",
+                        provider: "whatsapp",
                         batchedCount: batch.batchCount,
                         sourceMessageIds: batch.data.sourceMessageIds,
+                        sourceMessageId: batch.data.messageId,
                     },
                 });
 
@@ -75,13 +79,44 @@ function createInboundProcessor() {
                 return;
             }
 
+            if (skipAgentResponse) {
+                const user = await userRepo.upsertUser(phoneNumber, workspaceId, pushName);
+                await messageRepo.saveMessage({
+                    workspaceId,
+                    userId: user.id,
+                    role: "user",
+                    content: messageText,
+                    channelId,
+                    attachments: attachment ? [attachment] : undefined,
+                    metadata: {
+                        channelId,
+                        source: "wa-inbound",
+                        eventType: "wa-inbound",
+                        provider: "whatsapp",
+                        sourceMessageId: batch.data.messageId,
+                        mediaOnly: true,
+                    },
+                });
+
+                logInfo("pipeline.inbound.media_persisted_without_agent", {
+                    workspaceId,
+                    channelId,
+                    phoneNumber,
+                    mediaType: attachment?.type,
+                });
+                return;
+            }
+
             logInfo("pipeline.inbound.agent_start", {
                 phoneNumber,
                 preview: messageText.slice(0, 120),
                 batchedCount: batch.batchCount,
             });
 
-            const response = await runAgent(phoneNumber, messageText, pushName, workspaceId, channelId);
+            const response = await runAgent(phoneNumber, messageText, pushName, workspaceId, channelId, {
+                attachments: attachment ? [attachment] : undefined,
+                sourceMessageId: batch.data.messageId,
+            });
             logInfo("pipeline.inbound.agent_completed", {
                 phoneNumber,
                 responsePreview: response.slice(0, 200),
@@ -185,6 +220,15 @@ function createOutboundProcessor() {
                 if (campaignRecipientId) {
                     await campaignService.markRecipientFailed(campaignRecipientId, policyResult.message || "policy_rejected");
                 }
+                if (job.data.sourceMessageId) {
+                    const { messageRepo } = await import("../lib/db/messageRepo");
+                    await messageRepo.updateDeliveryStatus({
+                        workspaceId,
+                        messageId: job.data.sourceMessageId,
+                        status: "failed",
+                        errorMessage: policyResult.message || "Outbound policy rejected",
+                    });
+                }
                 return;
             }
 
@@ -224,6 +268,15 @@ function createOutboundProcessor() {
                 if (campaignRecipientId) {
                     await campaignService.markRecipientFailed(campaignRecipientId, "billing_limit_reached");
                 }
+                if (job.data.sourceMessageId) {
+                    const { messageRepo } = await import("../lib/db/messageRepo");
+                    await messageRepo.updateDeliveryStatus({
+                        workspaceId,
+                        messageId: job.data.sourceMessageId,
+                        status: "failed",
+                        errorMessage: "Outbound message limit reached",
+                    });
+                }
                 return;
             }
 
@@ -239,8 +292,18 @@ function createOutboundProcessor() {
             }
 
             await sendTyping(phoneNumber, text.length, { channelId, workspaceId });
-            await sendMessage(phoneNumber, text, { withTyping: false, channelId, workspaceId });
+            const externalMessageId = await sendMessage(phoneNumber, text, { withTyping: false, channelId, workspaceId });
             await recordDeliveryResult({ workspaceId, channelId, success: true, provider: "whatsapp" });
+
+            if (job.data.sourceMessageId) {
+                const { messageRepo } = await import("../lib/db/messageRepo");
+                await messageRepo.updateDeliveryStatus({
+                    workspaceId,
+                    messageId: job.data.sourceMessageId,
+                    status: "sent",
+                    externalMessageId: externalMessageId || undefined,
+                });
+            }
 
             if (campaignRecipientId) {
                 await campaignService.markRecipientSent(campaignRecipientId);

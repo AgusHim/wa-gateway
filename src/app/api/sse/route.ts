@@ -1,6 +1,7 @@
 import { waEvents } from "@/lib/baileys/events";
 import { requireApiSession } from "@/lib/auth/apiSession";
 import { ensureGatewayBootstrapped } from "@/lib/runtime/bootstrapServer";
+import { conversationEvents, type ConversationEventPayload } from "@/lib/realtime/conversationEvents";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -78,9 +79,21 @@ export async function GET(request: Request) {
                 send(toSSE("new-message", payload));
             };
 
+            const onConversationMessage = (payload: ConversationEventPayload) => {
+                if (payload.workspaceId !== auth.context.workspaceId) return;
+                send(toSSE("conversation-message", payload));
+            };
+
+            const onConversationStatus = (payload: ConversationEventPayload) => {
+                if (payload.workspaceId !== auth.context.workspaceId) return;
+                send(toSSE("conversation-status", payload));
+            };
+
             waEvents.on("qr", onQr);
             waEvents.on("connection-update", onConnection);
             waEvents.on("new-message", onMessage);
+            conversationEvents.on("message", onConversationMessage);
+            conversationEvents.on("status", onConversationStatus);
 
             // Force flush awal agar proxy (Nginx/Cloudflare) tidak menahan stream.
             send(`: ${" ".repeat(2048)}\n`);
@@ -116,6 +129,8 @@ export async function GET(request: Request) {
                 waEvents.off("qr", onQr);
                 waEvents.off("connection-update", onConnection);
                 waEvents.off("new-message", onMessage);
+                conversationEvents.off("message", onConversationMessage);
+                conversationEvents.off("status", onConversationStatus);
             };
 
             request.signal.addEventListener("abort", () => {

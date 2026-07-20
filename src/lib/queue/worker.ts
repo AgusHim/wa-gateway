@@ -446,6 +446,24 @@ function startOutboundWorkerByName(
                     jobId: job.id,
                 });
             }
+
+            if (job.data.sourceMessageId) {
+                try {
+                    const { messageRepo } = await import("../db/messageRepo");
+                    await messageRepo.updateDeliveryStatus({
+                        workspaceId: job.data.workspaceId,
+                        messageId: job.data.sourceMessageId,
+                        status: "failed",
+                        errorMessage: err.message,
+                    });
+                } catch (statusError) {
+                    logError("queue.outbound.status_update_failed", statusError, {
+                        queueName: job.queueName,
+                        jobId: job.id,
+                        messageId: job.data.sourceMessageId,
+                    });
+                }
+            }
         }
 
         logError("queue.job.failed", err, {

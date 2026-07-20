@@ -118,6 +118,19 @@ export async function enqueueInboundWithDebounce(
     data: InboundMessageJob
 ): Promise<void> {
     const now = Date.now();
+
+    // Media must be persisted as its own message; batching would drop attachment metadata.
+    if (data.attachment) {
+        await queue.add(`inbound-media:${data.channelId || "default"}`, {
+            ...data,
+            enqueuedAt: now,
+            debounceReady: true,
+            debouncedCount: 1,
+            firstBufferedAt: now,
+        });
+        return;
+    }
+
     const debounceWindowMs = getDebounceWindowMs();
     const bufferTtlMs = getBufferTtlMs();
     const dueAt = now + debounceWindowMs;

@@ -8,8 +8,8 @@ const { buildHistoryMessages } = require("../src/agent/prompts/historyPrompt");
 test("buildSystemPrompt includes identity behavior and skills", () => {
   const result = buildSystemPrompt();
 
-  assert.ok(result.includes("PENTING: Kamu adalah Customer Service"));
-  assert.ok(result.includes("Kamu adalah **Cholis**"));
+  assert.ok(result.includes("Kamu adalah asisten virtual resmi untuk tenant ini."));
+  assert.ok(result.includes("Nama Asisten: {{ASSISTANT_NAME}}"));
   assert.ok(result.length > 50);
 });
 

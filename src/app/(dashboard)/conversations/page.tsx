@@ -11,6 +11,10 @@ import {
 import type { ChatUserDashboardRow } from "@/lib/db/userRepo";
 import type { ConversationsSearchParams, PageWithSearchParams } from "@/types/dashboard";
 import { requireSessionPermission } from "@/lib/auth/sessionContext";
+import { ChannelProvider } from "@prisma/client";
+import { hasTenantPermission } from "@/lib/auth/policy";
+import { serializeConversationMessage } from "@/lib/conversations/serialize";
+import { WhatsAppConversationInbox } from "@/components/dashboard/WhatsAppConversationInbox";
 
 function parseDate(value?: string, options?: { endOfDay?: boolean }): Date | undefined {
     if (!value) return undefined;
@@ -34,7 +38,7 @@ function readString(value: unknown): string {
 }
 
 function matchSourceFilter(metadata: Record<string, unknown>, sourceFilter: string): boolean {
-    if (!sourceFilter) {
+    if (!sourceFilter || sourceFilter === "all") {
         return true;
     }
 
@@ -53,6 +57,22 @@ function matchSourceFilter(metadata: Record<string, unknown>, sourceFilter: stri
     return eventType === sourceFilter;
 }
 
+function buildWhatsAppConversationHref(
+    params: ConversationsSearchParams,
+    userId: string,
+    channelId: string
+): string {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (typeof value === "string" && value.trim()) search.set(key, value);
+    }
+    search.set("source", "whatsapp");
+    search.set("channelId", channelId);
+    search.set("userId", userId);
+    search.delete("threadId");
+    return `/conversations?${search.toString()}`;
+}
+
 function sourceBadgeText(metadata: Record<string, unknown>): string {
     const eventType = readString(metadata.eventType);
     if (eventType) return eventType;
@@ -66,30 +86,55 @@ function sourceBadgeText(metadata: Record<string, unknown>): string {
 export default async function ConversationsPage({
     searchParams,
 }: PageWithSearchParams<ConversationsSearchParams>) {
-    const { workspaceId } = await requireSessionPermission("read");
+    const sessionContext = await requireSessionPermission("read");
+    const { workspaceId } = sessionContext;
     const params = await searchParams;
     const query = params.q?.trim();
     const label = params.label?.trim() || undefined;
-    const channelId = params.channelId?.trim() || undefined;
-    const sourceFilter = params.source?.trim().toLowerCase() || "";
+    const requestedChannelId = params.channelId?.trim() || undefined;
+    const sourceFilter = params.source?.trim().toLowerCase() || "whatsapp";
     const dateFrom = parseDate(params.dateFrom);
     const dateTo = parseDate(params.dateTo, { endOfDay: true });
 
-    const [users, labels, channels]: [ChatUserDashboardRow[], string[], Awaited<ReturnType<typeof channelRepo.listWorkspaceChannels>>] = await Promise.all([
+    const channels = await channelRepo.listWorkspaceChannels(workspaceId);
+    const whatsappChannels = channels.filter((channel) => channel.providerType === ChannelProvider.WHATSAPP);
+    const requestedWhatsAppChannel = whatsappChannels.find((channel) => channel.id === requestedChannelId);
+    const activeWhatsAppChannel = requestedWhatsAppChannel
+        || whatsappChannels.find((channel) => channel.isPrimary)
+        || whatsappChannels[0];
+    const isWhatsAppInbox = sourceFilter === "whatsapp" && Boolean(activeWhatsAppChannel);
+    const channelId = isWhatsAppInbox ? activeWhatsAppChannel?.id : requestedChannelId;
+
+    const [users, labels]: [ChatUserDashboardRow[], string[]] = await Promise.all([
         userRepo.getUsersForDashboard(workspaceId, { query, label, dateFrom, dateTo, channelId, source: sourceFilter || undefined }),
         userRepo.getDistinctLabels(workspaceId),
-        channelRepo.listWorkspaceChannels(workspaceId),
     ]);
 
     const selectedUser = users.find((u) => u.id === params.userId) ?? users[0];
-    const allMessages = selectedUser
-        ? await messageRepo.getConversation(workspaceId, selectedUser.id, 1, 500, channelId)
-        : [];
+    const whatsappPage = isWhatsAppInbox && selectedUser && activeWhatsAppChannel
+        ? await messageRepo.getConversationPage({
+            workspaceId,
+            userId: selectedUser.id,
+            channelId: activeWhatsAppChannel.id,
+            limit: 50,
+        })
+        : null;
+    const allMessages = whatsappPage
+        ? whatsappPage.messages
+        : selectedUser
+            ? await messageRepo.getConversation(workspaceId, selectedUser.id, 1, 500, channelId)
+            : [];
 
     const filteredMessages = allMessages.filter((message) => matchSourceFilter(asRecord(message.metadata), sourceFilter));
     const selectedUserHandoverPending = selectedUser
         ? await handoverRepo.isPending(selectedUser.phoneNumber, workspaceId)
         : false;
+
+    const whatsappRuntimeStatus = isWhatsAppInbox && activeWhatsAppChannel
+        ? (await (await import("@/lib/baileys/client")).getWorkspaceChannelRuntimeStatus(workspaceId, { provider: "whatsapp" }))
+            .find((item) => item.channelId === activeWhatsAppChannel.id)?.status || "close"
+        : "close";
+    const canWrite = hasTenantPermission(sessionContext.membershipRole, "write");
 
     const threadMap = new Map<string, {
         threadId: string;
@@ -145,12 +190,16 @@ export default async function ConversationsPage({
         ? await messageRepo.getInstagramThreadAutoReplyState(workspaceId, selectedThreadId, channelId)
         : null;
     const threadAutoReplyEnabled = selectedThreadAutoReply?.enabled ?? true;
+    const latestWhatsAppMessages = isWhatsAppInbox && activeWhatsAppChannel
+        ? await messageRepo.getLatestMessagesByUser(workspaceId, users.map((user) => user.id), activeWhatsAppChannel.id)
+        : [];
+    const latestWhatsAppByUser = new Map(latestWhatsAppMessages.map((message) => [message.userId, message]));
 
     return (
         <section className="space-y-4">
             <div>
                 <h1 className="text-2xl font-semibold text-slate-900">Conversations</h1>
-                <p className="text-sm text-slate-500">Riwayat chat user dengan filter channel/source dan kontrol thread Instagram.</p>
+                <p className="text-sm text-slate-500">Inbox WhatsApp untuk pesan dan balasan operator, serta riwayat thread Instagram.</p>
             </div>
 
             <form className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 md:grid-cols-7">
@@ -178,7 +227,7 @@ export default async function ConversationsPage({
                     defaultValue={sourceFilter || ""}
                     className="rounded-md border border-slate-300 px-3 py-2 text-sm"
                 >
-                    <option value="">Semua source</option>
+                    <option value="all">Semua source</option>
                     <option value="whatsapp">WhatsApp</option>
                     <option value="instagram">Instagram (All)</option>
                     <option value="instagram-dm">Instagram DM</option>
@@ -213,6 +262,37 @@ export default async function ConversationsPage({
                 </button>
             </form>
 
+            {isWhatsAppInbox && activeWhatsAppChannel ? (
+                <WhatsAppConversationInbox
+                    key={`${activeWhatsAppChannel.id}:${selectedUser?.id || "empty"}`}
+                    users={users.map((user) => {
+                        const latest = latestWhatsAppByUser.get(user.id);
+                        return {
+                            id: user.id,
+                            name: user.name || "Tanpa Nama",
+                            phoneNumber: user.phoneNumber,
+                            lastMessage: latest?.content || "Belum ada pesan",
+                            lastMessageAt: latest?.createdAt.toISOString() || null,
+                            href: buildWhatsAppConversationHref(params, user.id, activeWhatsAppChannel.id),
+                        };
+                    })}
+                    selectedUser={selectedUser ? {
+                        id: selectedUser.id,
+                        name: selectedUser.name || "Tanpa Nama",
+                        phoneNumber: selectedUser.phoneNumber,
+                    } : null}
+                    channel={{
+                        id: activeWhatsAppChannel.id,
+                        name: activeWhatsAppChannel.name,
+                        isEnabled: activeWhatsAppChannel.isEnabled,
+                    }}
+                    initialConnectionStatus={whatsappRuntimeStatus}
+                    initialMessages={(whatsappPage?.messages || []).map(serializeConversationMessage)}
+                    initialNextCursor={whatsappPage?.nextCursor || null}
+                    initialHandoverPending={selectedUserHandoverPending}
+                    canWrite={canWrite}
+                />
+            ) : (
             <div className="grid gap-4 lg:grid-cols-[320px,1fr]">
                 <aside className="rounded-lg border border-slate-200 bg-white">
                     <div className="border-b border-slate-200 px-4 py-3 text-sm font-medium text-slate-700">
@@ -391,6 +471,7 @@ export default async function ConversationsPage({
                     </div>
                 </div>
             </div>
+            )}
         </section>
     );
 }

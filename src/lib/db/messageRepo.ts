@@ -1,6 +1,8 @@
 import { prisma } from "./client";
 import { Prisma } from "@prisma/client";
 import { assertTenantScope } from "@/lib/tenant/context";
+import type { InboundAttachmentPayload } from "@/lib/media/types";
+import { emitConversationMessage, emitConversationStatus } from "@/lib/realtime/conversationEvents";
 
 function asRecord(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -17,15 +19,58 @@ export const messageRepo = {
         content: string;
         toolName?: string;
         metadata?: Record<string, unknown>;
+        channelId?: string;
+        deliveryStatus?: string;
+        idempotencyKey?: string;
+        externalMessageId?: string;
+        attachments?: InboundAttachmentPayload[];
     }) {
         const resolvedWorkspaceId = assertTenantScope(data.workspaceId);
-        return prisma.message.create({
+        const metadata = data.metadata || {};
+        const channelId = data.channelId?.trim()
+            || (typeof metadata.channelId === "string" ? metadata.channelId.trim() : "")
+            || undefined;
+        const message = await prisma.message.create({
             data: {
-                ...data,
                 workspaceId: resolvedWorkspaceId,
-                metadata: data.metadata as Prisma.InputJsonValue ?? Prisma.JsonNull,
+                userId: data.userId,
+                role: data.role,
+                content: data.content,
+                toolName: data.toolName,
+                channelId,
+                deliveryStatus: data.deliveryStatus,
+                idempotencyKey: data.idempotencyKey,
+                externalMessageId: data.externalMessageId,
+                metadata: metadata as Prisma.InputJsonValue ?? Prisma.JsonNull,
+                attachments: data.attachments?.length
+                    ? {
+                        create: data.attachments.map((attachment) => ({
+                            workspaceId: resolvedWorkspaceId,
+                            type: attachment.type,
+                            status: attachment.status,
+                            storageKey: attachment.storageKey,
+                            fileName: attachment.fileName,
+                            mimeType: attachment.mimeType,
+                            byteSize: attachment.byteSize,
+                            checksum: attachment.checksum,
+                            durationMs: attachment.durationMs,
+                            isAnimated: attachment.isAnimated ?? false,
+                            errorMessage: attachment.errorMessage,
+                        })),
+                    }
+                    : undefined,
             },
+            include: { attachments: true },
         });
+
+        emitConversationMessage({
+            workspaceId: resolvedWorkspaceId,
+            channelId: message.channelId,
+            userId: message.userId,
+            messageId: message.id,
+            deliveryStatus: message.deliveryStatus,
+        });
+        return message;
     },
 
     async getRecentHistory(workspaceId: string, userId: string, limit: number = 20) {
@@ -54,16 +99,159 @@ export const messageRepo = {
             where: {
                 userId,
                 workspaceId: resolvedWorkspaceId,
-                metadata: normalizedChannelId
-                    ? {
-                        path: ["channelId"],
-                        equals: normalizedChannelId,
-                    }
+                OR: normalizedChannelId
+                    ? [
+                        { channelId: normalizedChannelId },
+                        {
+                            channelId: null,
+                            metadata: {
+                                path: ["channelId"],
+                                equals: normalizedChannelId,
+                            },
+                        },
+                    ]
                     : undefined,
             },
             orderBy: { createdAt: "asc" },
             skip,
             take: pageSize,
+            include: { attachments: true },
+        });
+    },
+
+    async getConversationPage(input: {
+        workspaceId: string;
+        userId: string;
+        channelId: string;
+        cursor?: string;
+        limit?: number;
+    }) {
+        const workspaceId = assertTenantScope(input.workspaceId);
+        const channelId = input.channelId.trim();
+        const limit = Math.max(1, Math.min(100, Math.round(input.limit || 50)));
+        const rows = await prisma.message.findMany({
+            where: {
+                workspaceId,
+                userId: input.userId,
+                OR: [
+                    { channelId },
+                    {
+                        channelId: null,
+                        metadata: {
+                            path: ["channelId"],
+                            equals: channelId,
+                        },
+                    },
+                ],
+            },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            take: limit + 1,
+            cursor: input.cursor ? { id: input.cursor } : undefined,
+            skip: input.cursor ? 1 : 0,
+            include: { attachments: true },
+        });
+        const hasMore = rows.length > limit;
+        const page = rows.slice(0, limit);
+        const nextCursor = hasMore ? page[page.length - 1]?.id || null : null;
+        return {
+            messages: page.reverse(),
+            nextCursor,
+        };
+    },
+
+    async getLatestMessagesByUser(workspaceId: string, userIds: string[], channelId: string) {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
+        if (userIds.length === 0) return [];
+        return prisma.message.findMany({
+            where: {
+                workspaceId: resolvedWorkspaceId,
+                userId: { in: userIds },
+                OR: [
+                    { channelId },
+                    {
+                        channelId: null,
+                        metadata: {
+                            path: ["channelId"],
+                            equals: channelId,
+                        },
+                    },
+                ],
+            },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            distinct: ["userId"],
+            select: {
+                id: true,
+                userId: true,
+                content: true,
+                createdAt: true,
+            },
+        });
+    },
+
+    async getMessageById(workspaceId: string, messageId: string) {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
+        return prisma.message.findFirst({
+            where: { id: messageId, workspaceId: resolvedWorkspaceId },
+            include: { attachments: true },
+        });
+    },
+
+    async getMessageByIdempotencyKey(workspaceId: string, idempotencyKey: string) {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
+        return prisma.message.findFirst({
+            where: { workspaceId: resolvedWorkspaceId, idempotencyKey },
+            include: { attachments: true },
+        });
+    },
+
+    async updateDeliveryStatus(input: {
+        workspaceId: string;
+        messageId: string;
+        status: "queued" | "sent" | "failed";
+        externalMessageId?: string;
+        errorMessage?: string;
+    }) {
+        const workspaceId = assertTenantScope(input.workspaceId);
+        const current = await prisma.message.findFirst({
+            where: { id: input.messageId, workspaceId },
+            select: { id: true, userId: true, channelId: true, metadata: true },
+        });
+        if (!current) return null;
+
+        const metadata = asRecord(current.metadata);
+        const updated = await prisma.message.update({
+            where: { id: current.id },
+            data: {
+                deliveryStatus: input.status,
+                externalMessageId: input.externalMessageId,
+                metadata: {
+                    ...metadata,
+                    outboundStatus: input.status,
+                    outboundError: input.errorMessage || null,
+                    outboundUpdatedAt: new Date().toISOString(),
+                } as Prisma.InputJsonValue,
+            },
+            include: { attachments: true },
+        });
+
+        emitConversationStatus({
+            workspaceId,
+            channelId: updated.channelId,
+            userId: updated.userId,
+            messageId: updated.id,
+            deliveryStatus: updated.deliveryStatus,
+        });
+        return updated;
+    },
+
+    async getAttachment(workspaceId: string, attachmentId: string) {
+        const resolvedWorkspaceId = assertTenantScope(workspaceId);
+        return prisma.messageAttachment.findFirst({
+            where: {
+                id: attachmentId,
+                workspaceId: resolvedWorkspaceId,
+                message: { workspaceId: resolvedWorkspaceId },
+            },
         });
     },
 
